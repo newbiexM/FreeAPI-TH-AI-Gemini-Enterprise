@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.DS_Store
+
+# Runtime/auth material must never enter the repository.
+auth.json
+sessions.json
+chrome-profile/
+*.log
+
