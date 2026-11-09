@@ -70,8 +70,18 @@ def _reasoning_effort(body: dict[str, Any]) -> str | None:
 
 def _normalize_model_id(model_id: str) -> str:
     """Accept both Hermes' bare ``-m`` value and ``provider/model`` form."""
-    prefix = "aipass/"
-    return model_id[len(prefix):] if model_id.lower().startswith(prefix) else model_id
+    prefixes = (
+        "aipass-gemini-enterprise/",
+        "aipass_gemini_enterprise/",
+        "aipass-ge/",
+        "gemini-enterprise/",
+        "aipass/",
+    )
+    lower = model_id.lower()
+    for prefix in prefixes:
+        if lower.startswith(prefix):
+            return model_id[len(prefix):]
+    return model_id
 
 
 class Handler(BaseHTTPRequestHandler):

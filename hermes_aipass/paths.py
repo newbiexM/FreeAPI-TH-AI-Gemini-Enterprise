@@ -37,6 +37,10 @@ def metadata_path() -> Path:
     return runtime_dir() / "auth-metadata.json"
 
 
+def auth_json_path() -> Path:
+    return runtime_dir() / "auth.json"
+
+
 def chrome_profile_dir() -> Path:
     return runtime_dir() / "chrome-profile"
 

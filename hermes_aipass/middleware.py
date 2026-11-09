@@ -14,7 +14,17 @@ def attach_session_header(
     **_: Any,
 ) -> dict[str, Any] | None:
     """Attach the logical Hermes session only to the local AiPASS provider."""
-    is_aipass = str(provider).lower() == "aipass" or "127.0.0.1:8792" in str(base_url)
+    normalized_provider = str(provider).lower()
+    is_aipass = (
+        normalized_provider in {
+            "aipass",
+            "aipass-gemini-enterprise",
+            "aipass_gemini_enterprise",
+            "aipass-ge",
+            "gemini-enterprise",
+        }
+        or "127.0.0.1:8792" in str(base_url)
+    )
     if not is_aipass or not session_id:
         return None
     updated = dict(request)

@@ -32,7 +32,7 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
     setup = sub.add_parser("setup", help="Configure the provider and bridge daemon")
     setup.add_argument("--set-default", action="store_true", help="Make AiPASS the default Hermes provider")
 
-    login = sub.add_parser("login", help="Authenticate through a temporary Chrome window")
+    login = sub.add_parser("login", help="Authenticate through Brave Browser")
     login.add_argument("--timeout", type=int, default=300)
 
     sub.add_parser("logout", help="Delete AiPASS credentials and conversation mappings")
@@ -171,7 +171,7 @@ def _auth_present() -> bool:
 
 
 def _login(args: argparse.Namespace) -> int:
-    print("Complete AiPASS sign-in in the Chrome window. It will close automatically.")
+    print("Connecting to Brave Browser to capture AiPASS session...")
     result = interactive_login(timeout=args.timeout)
     print(f"AiPASS login succeeded. Session expiry: {result.get('expires_at') or 'server-managed'}")
     if launch_agent_path().exists():

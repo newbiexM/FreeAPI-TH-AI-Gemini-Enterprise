@@ -11,7 +11,8 @@ import struct
 import subprocess
 import time
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 from .auth import AuthError, KeychainStore, state_from_cdp_cookies, validate_auth
 from .paths import chrome_profile_dir
@@ -124,15 +125,17 @@ class WebSocket:
         self.sock.close()
 
 
-def _chrome_binary() -> Path:
+def _browser_binary() -> Path:
     candidates = [
+        Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
+        Path.home() / "Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
         Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
         Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     ]
     for path in candidates:
         if path.exists():
             return path
-    raise AuthError("Google Chrome is required for AiPASS login")
+    raise AuthError("Brave Browser is required for AiPASS login")
 
 
 def _targets(port: int) -> list[dict]:
@@ -140,56 +143,93 @@ def _targets(port: int) -> list[dict]:
         return json.loads(response.read().decode())
 
 
-def interactive_login(port: int = 9224, timeout: int = 300) -> dict:
-    """Open Chrome for OAuth, save auth in Keychain, then close that browser."""
-    profile = chrome_profile_dir()
-    profile.mkdir(parents=True, exist_ok=True, mode=0o700)
-    process = subprocess.Popen(
-        [
-            str(_chrome_binary()),
-            f"--user-data-dir={profile}",
-            f"--remote-debugging-port={port}",
-            "--no-first-run",
-            "https://de.aipass.net/chat",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    deadline = time.monotonic() + timeout
-    page: dict | None = None
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise AuthError("Chrome closed before AiPASS login completed")
-        try:
-            pages = _targets(port)
-            page = next(
-                (item for item in pages if item.get("type") == "page" and "de.aipass.net" in item.get("url", "")),
-                None,
-            )
-            if page and "/chat" in page.get("url", "") and "/sign-in" not in page.get("url", ""):
-                client = WebSocket(page["webSocketDebuggerUrl"])
-                session = client.call(
-                    "Runtime.evaluate",
-                    {
-                        "expression": "fetch('/api/v1/auth/get-session').then(r => r.ok)",
-                        "awaitPromise": True,
-                        "returnByValue": True,
-                    },
-                )
-                if session.get("result", {}).get("value") is True:
-                    cookies = client.call("Network.getAllCookies").get("cookies", [])
-                    state = state_from_cdp_cookies(cookies)
-                    KeychainStore().save(state)
-                    validate_auth(state)
-                    client.call("Browser.close")
-                    client.close()
-                    return {"valid": True, "expires_at": state.expires_at}
-                client.close()
-        except (OSError, ValueError, AuthError):
-            pass
-        time.sleep(1)
+def _new_target(port: int, url: str) -> dict:
+    req = Request(f"http://127.0.0.1:{port}/json/new?{url}", method="PUT")
+    with urlopen(req, timeout=2) as response:
+        return json.loads(response.read().decode())
+
+
+def _close_target(port: int, target_id: str) -> None:
     try:
-        process.terminate()
-    except OSError:
+        req = Request(f"http://127.0.0.1:{port}/json/close/{target_id}")
+        with urlopen(req, timeout=2):
+            pass
+    except Exception:
         pass
-    raise AuthError("Timed out waiting for AiPASS login")
+
+
+def interactive_login(port: int = 9222, timeout: int = 300) -> dict:
+    """Connect to Brave/Chrome DevTools, capture session, and save credentials."""
+    running_process = None
+    already_running = False
+    opened_target_id: str | None = None
+    try:
+        pages = _targets(port)
+        already_running = True
+        # If no aipass page is currently open, create a background tab
+        if not any(item.get("type") == "page" and "de.aipass.net" in item.get("url", "") for item in pages):
+            new_tab = _new_target(port, "https://de.aipass.net/chat")
+            opened_target_id = new_tab.get("id")
+    except (OSError, URLError):
+        pass
+
+    if not already_running:
+        profile = chrome_profile_dir()
+        profile.mkdir(parents=True, exist_ok=True, mode=0o700)
+        running_process = subprocess.Popen(
+            [
+                str(_browser_binary()),
+                f"--user-data-dir={profile}",
+                f"--remote-debugging-port={port}",
+                "--no-first-run",
+                "https://de.aipass.net/chat",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    deadline = time.monotonic() + timeout
+    try:
+        while time.monotonic() < deadline:
+            if running_process is not None and running_process.poll() is not None:
+                raise AuthError("Browser closed before AiPASS login completed")
+            try:
+                pages = _targets(port)
+                page = next(
+                    (item for item in pages if item.get("type") == "page" and "de.aipass.net" in item.get("url", "")),
+                    None,
+                )
+                if page and "/chat" in page.get("url", "") and "/sign-in" not in page.get("url", ""):
+                    client = WebSocket(page["webSocketDebuggerUrl"])
+                    session = client.call(
+                        "Runtime.evaluate",
+                        {
+                            "expression": "fetch('/api/v1/auth/get-session').then(r => r.ok)",
+                            "awaitPromise": True,
+                            "returnByValue": True,
+                        },
+                    )
+                    if session.get("result", {}).get("value") is True:
+                        cookies = client.call("Network.getCookies", {"urls": ["https://de.aipass.net"]}).get("cookies", [])
+                        if not cookies:
+                            cookies = client.call("Network.getAllCookies").get("cookies", [])
+                        state = state_from_cdp_cookies(cookies)
+                        KeychainStore().save(state)
+                        validate_auth(state)
+                        if not already_running:
+                            client.call("Browser.close")
+                        client.close()
+                        return {"valid": True, "expires_at": state.expires_at}
+                    client.close()
+            except (OSError, ValueError, AuthError):
+                pass
+            time.sleep(1)
+        raise AuthError("Timed out waiting for AiPASS login")
+    finally:
+        if opened_target_id:
+            _close_target(port, opened_target_id)
+        if running_process is not None:
+            try:
+                running_process.terminate()
+            except OSError:
+                pass

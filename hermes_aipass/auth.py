@@ -14,7 +14,7 @@ from typing import Iterable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .paths import atomic_write_json, metadata_path
+from .paths import atomic_write_json, auth_json_path, metadata_path, read_json
 
 BASE_URL = "https://de.aipass.net"
 KEYCHAIN_SERVICE = "hermes-aipass-auth"
@@ -50,67 +50,79 @@ class AuthState:
 
 
 class KeychainStore:
-    """Store reusable web-session credentials in macOS Keychain."""
-
-    def _require_macos(self) -> None:
-        if platform.system() != "Darwin":
-            raise AuthError("hermes-aipass v0.1 supports macOS Keychain only")
+    """Store reusable web-session credentials in macOS Keychain with file fallback."""
 
     def save(self, state: AuthState) -> None:
-        self._require_macos()
-        subprocess.run(
-            [
-                "security", "add-generic-password", "-U",
-                "-a", KEYCHAIN_ACCOUNT,
-                "-s", KEYCHAIN_SERVICE,
-                "-w", state.as_json(),
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        if platform.system() == "Darwin":
+            try:
+                subprocess.run(
+                    [
+                        "security", "add-generic-password", "-U",
+                        "-a", KEYCHAIN_ACCOUNT,
+                        "-s", KEYCHAIN_SERVICE,
+                        "-w", state.as_json(),
+                    ],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            except Exception:
+                pass
+        atomic_write_json(auth_json_path(), json.loads(state.as_json()))
         atomic_write_json(metadata_path(), {"expires_at": state.expires_at})
 
     def load(self) -> AuthState:
-        self._require_macos()
-        result = subprocess.run(
-            [
-                "security", "find-generic-password",
-                "-a", KEYCHAIN_ACCOUNT,
-                "-s", KEYCHAIN_SERVICE,
-                "-w",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            raise AuthError("AiPASS is not authenticated; run `hermes aipass login`")
-        try:
-            raw = json.loads(result.stdout)
-            cookies = raw["cookies"]
-            if not isinstance(cookies, dict) or not cookies:
-                raise ValueError
-            return AuthState(
-                cookies={str(k): str(v) for k, v in cookies.items()},
-                expires_at=raw.get("expires_at"),
-            )
-        except (ValueError, TypeError, KeyError) as exc:
-            raise AuthError("AiPASS Keychain entry is invalid; run `hermes aipass login`") from exc
+        if platform.system() == "Darwin":
+            try:
+                result = subprocess.run(
+                    [
+                        "security", "find-generic-password",
+                        "-a", KEYCHAIN_ACCOUNT,
+                        "-s", KEYCHAIN_SERVICE,
+                        "-w",
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    raw = json.loads(result.stdout)
+                    cookies = raw.get("cookies")
+                    if isinstance(cookies, dict) and cookies:
+                        return AuthState(
+                            cookies={str(k): str(v) for k, v in cookies.items()},
+                            expires_at=raw.get("expires_at"),
+                        )
+            except Exception:
+                pass
+
+        if auth_json_path().exists():
+            try:
+                raw = read_json(auth_json_path(), {})
+                cookies = raw.get("cookies")
+                if isinstance(cookies, dict) and cookies:
+                    return AuthState(
+                        cookies={str(k): str(v) for k, v in cookies.items()},
+                        expires_at=raw.get("expires_at"),
+                    )
+            except Exception:
+                pass
+        raise AuthError("AiPASS is not authenticated; run `hermes aipass login`")
 
     def delete(self) -> None:
-        self._require_macos()
-        subprocess.run(
-            [
-                "security", "delete-generic-password",
-                "-a", KEYCHAIN_ACCOUNT,
-                "-s", KEYCHAIN_SERVICE,
-            ],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        if platform.system() == "Darwin":
+            subprocess.run(
+                [
+                    "security", "delete-generic-password",
+                    "-a", KEYCHAIN_ACCOUNT,
+                    "-s", KEYCHAIN_SERVICE,
+                ],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        auth_json_path().unlink(missing_ok=True)
         metadata_path().unlink(missing_ok=True)
 
 

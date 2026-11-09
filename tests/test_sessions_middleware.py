@@ -85,6 +85,7 @@ class SessionMiddlewareTests(unittest.TestCase):
 
     def test_provider_prefixed_model_is_normalized(self):
         self.assertEqual(_normalize_model_id("aipass/gemini-3.1-flash-lite"), "gemini-3.1-flash-lite")
+        self.assertEqual(_normalize_model_id("aipass-gemini-enterprise/gemini-3.8-flash"), "gemini-3.8-flash")
         self.assertEqual(_normalize_model_id("gpt-5.6-sol"), "gpt-5.6-sol")
 
 

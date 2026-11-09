@@ -1,9 +1,9 @@
-# Hermes AiPASS
+# Hermes AiPASS & Gemini Enterprise
 
 An unofficial standalone [Hermes Agent](https://github.com/NousResearch/hermes-agent)
-provider for TH-AI Passport. It exposes the authenticated AiPASS web transport
-as a local OpenAI-compatible endpoint, so Hermes can use AiPASS text models,
-stream replies, and run its normal tool loop from the terminal.
+provider for TH-AI Passport and Gemini Enterprise. It exposes authenticated
+models as a local OpenAI-compatible endpoint, so Hermes can use text models,
+stream replies, and run its normal tool loop across CLI, TUI, Desktop, and WebUI.
 
 > [!WARNING]
 > AiPASS does not publish this as a public API. This plugin follows the same
@@ -12,28 +12,29 @@ stream replies, and run its normal tool loop from the terminal.
 
 ## Requirements
 
-- macOS (the first release uses Keychain and LaunchAgent)
-- Hermes Agent
-- Google Chrome, needed only while signing in or renewing an expired session
-- An active AiPASS account
+- macOS or Linux Container with Mac-assisted authentication
+- Hermes Agent (CLI, TUI, Desktop, or WebUI)
+- Brave Browser (default, via remote debugging port 9222) or Google Chrome
+- An active TH-AI Passport account with Gemini Enterprise access
 
 ## Install
 
 ```bash
-hermes plugins install Yeet2042/hermes-aipass --enable
+hermes plugins install newbiexM/Hermes_TH-AI-pass_Gemini-Enterprise --enable
 hermes aipass setup --set-default
 hermes aipass login
 ```
 
-After login, Chrome closes and is not used while chatting. Start Hermes normally:
+After login, authentication credentials are saved securely in macOS Keychain with `auth.json` file fallback for container portability. Start Hermes normally:
 
 ```bash
 hermes
-hermes -m gpt-5.6-sol
+hermes -m aipass/gpt-6.1-sol
+hermes -m aipass-gemini-enterprise/gemini-3.8-flash
 hermes -z "Summarize this repository"
 ```
 
-Use `/model` inside Hermes to select any currently available AiPASS text model.
+Use `/model` inside Hermes to select between **TH-AI Passport** models and **AiPASS Gemini Enterprise** models.
 
 ## Management
 
