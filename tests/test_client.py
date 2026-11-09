@@ -35,6 +35,13 @@ class ClientErrorTests(unittest.TestCase):
             with self.assertRaisesRegex(ProtocolError, "account access or paid credits"):
                 self._client()._open(Request("https://de.aipass.net/chat.data"))
 
+    def test_legacy_or_unknown_model_falls_back_to_default(self):
+        client = self._client()
+        model = client.model("glm-5.3")
+        self.assertEqual(model.id, "gemini-3.8-flash")
+        model2 = client.model("gpt-6.1-sol")
+        self.assertEqual(model2.id, "gemini-3.8-flash")
+
 
 if __name__ == "__main__":
     unittest.main()

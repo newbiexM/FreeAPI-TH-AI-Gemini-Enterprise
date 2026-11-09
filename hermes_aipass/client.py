@@ -93,8 +93,11 @@ class AiPassClient:
         for model in self.models():
             if model.id == normalized:
                 return model
-        available = ", ".join(model.id for model in self.models())
-        raise ProtocolError(f"Gemini Enterprise model {model_id!r} is unavailable. Available models: {available}")
+        # Graceful fallback for legacy or unknown model requests (e.g. glm-5.3, gpt-6.1-sol, auto)
+        for model in self.models():
+            if model.id == "gemini-3.8-flash":
+                return model
+        return self.models()[0]
 
     @staticmethod
     def _multipart(fields: dict[str, str]) -> tuple[bytes, str]:

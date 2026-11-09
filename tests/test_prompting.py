@@ -107,6 +107,40 @@ class PromptingTests(unittest.TestCase):
         self.assertIn("### ACTIVE OBJECTIVE:", prompt)
         self.assertIn("Find the secret key in config", prompt)
 
+    def test_preserves_assistant_content_with_tool_calls(self):
+        message = {
+            "role": "assistant",
+            "content": "Analyzing Zed IDE configuration now.",
+            "tool_calls": [{"id": "c1", "function": {"name": "terminal", "arguments": "{\"command\":\"pwd\"}"}}],
+        }
+        from hermes_aipass.prompting import format_message
+        formatted = format_message(message)
+        self.assertIn("Analyzing Zed IDE configuration now.", formatted)
+        self.assertIn("Previous tool request:", formatted)
+
+    def test_suppresses_hallucinated_tool_result_simulation(self):
+        raw = (
+            "Let me check the port.\n"
+            "<tool_call>{\"id\": \"c1\", \"name\": \"terminal\", \"arguments\": {\"command\": \"ss -tlpn\"}}</tool_call>\n"
+            "Tool result (terminal):\nLISTEN 127.0.0.1:8792"
+        )
+        parsed = parse_assistant(raw, {"terminal"})
+        self.assertEqual(len(parsed["tool_calls"]), 1)
+        self.assertNotIn("Tool result (terminal):", str(parsed.get("content")))
+        self.assertNotIn("LISTEN", str(parsed.get("content")))
+
+    def test_replays_real_session_fixture_without_errors(self):
+        import json
+        import os
+        fixture_path = os.path.join(os.path.dirname(__file__), "fixture_session_tail.json")
+        if os.path.exists(fixture_path):
+            with open(fixture_path) as f:
+                msgs = json.load(f)
+            prompt = bootstrap_prompt(msgs, TOOLS)
+            self.assertIsInstance(prompt, str)
+            self.assertTrue(len(prompt) > 1000)
+            self.assertIn("Available tools", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

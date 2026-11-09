@@ -90,12 +90,15 @@ def _tool_guide(tools: list[dict[str, Any]]) -> str:
     return (
         "\n\nAvailable tools (OpenAI function schemas):\n"
         + json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
-        + "\n\nIf you need to execute tools, emit either:\n"
+        + "\n\nCRITICAL INSTRUCTIONS FOR TOOLS:\n"
+        + "- If you need to execute tools, emit either:\n"
         + "<tool_call>{\"name\":\"tool_name\",\"arguments\":{}}</tool_call>\n"
         + "or output the sentinel on its own line:\n"
         + TOOL_SENTINEL
         + "\n{\"tool_calls\":[{\"name\":\"tool_name\",\"arguments\":{}}]}\n"
-        + "If no tool is required, answer normally. Never invent or simulate tool results."
+        + "- If no tool is required, answer normally.\n"
+        + "- NEVER simulate or hallucinate tool results (e.g. 'Tool result (...):'). Real tool results are provided externally by Hermes Agent in the next turn.\n"
+        + "- When a tool execution returns an error or non-zero exit code, acknowledge the real error output honestly; do not claim success when an operation failed."
     )
 
 
@@ -106,10 +109,16 @@ def format_message(message: dict[str, Any], is_recent_tool: bool = True) -> str:
         raw_text = message_text(message)
         pruned = prune_tool_content(raw_text, is_recent=is_recent_tool)
         return f"Tool result ({label}):\n{pruned}"
-    if role == "assistant" and message.get("tool_calls"):
-        return "Previous tool request:\n" + json.dumps(
-            message["tool_calls"], ensure_ascii=False, separators=(",", ":")
-        )
+    if role == "assistant":
+        parts = []
+        text = message_text(message).strip()
+        if text:
+            parts.append(text)
+        if message.get("tool_calls"):
+            parts.append("Previous tool request:\n" + json.dumps(
+                message["tool_calls"], ensure_ascii=False, separators=(",", ":")
+            ))
+        return "Assistant:\n" + "\n\n".join(parts) if parts else "Assistant:\n"
     label = {"assistant": "Assistant", "user": "User", "system": "System"}.get(role, "Message")
     return f"{label}:\n{message_text(message)}"
 
@@ -126,6 +135,14 @@ def _build_conversation_turns(messages: list[dict[str, Any]]) -> list[str]:
         format_message(m, is_recent_tool=(i in recent_tool_set))
         for i, m in enumerate(non_system)
     ]
+
+
+_SYSTEM_PREAMBLE = (
+    "You are operating as the language-model inference backend for Hermes Agent on the user's computer. "
+    "All filesystem, terminal, and environmental interactions are executed safely and externally by Hermes Agent on the host. "
+    "When asked to inspect files, execute commands, read directories, or interact with the system, do NOT refuse or claim you cannot access the computer; "
+    "instead, emit the appropriate tool call so Hermes Agent can execute it on your behalf. Follow the system instructions and preserve the user's language."
+)
 
 
 def bootstrap_prompt(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> str:
@@ -147,8 +164,7 @@ def bootstrap_prompt(messages: list[dict[str, Any]], tools: list[dict[str, Any]]
             )
 
     return (
-        "Act as the language-model backend for a command-line AI agent. "
-        "Follow the system instructions and preserve the user's language.\n\n"
+        f"{_SYSTEM_PREAMBLE}\n\n"
         f"System instructions:\n{systems}"
         f"{_tool_guide(tools)}"
         f"{objective_section}\n\nConversation:\n{turns}"
@@ -183,7 +199,6 @@ def parse_assistant(raw: str, allowed_tools: set[str]) -> dict[str, Any]:
             except json.JSONDecodeError as exc:
                 raise ValueError(f"Malformed <tool_call> JSON: {exc.msg}") from exc
             
-            # Support both flat {"name": ..., "arguments": ...} and nested {"function": {...}}
             if not isinstance(parsed, dict):
                 continue
             name = parsed.get("name")
@@ -215,8 +230,16 @@ def parse_assistant(raw: str, allowed_tools: set[str]) -> dict[str, Any]:
                 }
             )
 
-        # Remove the <tool_call> tags from the content
         clean_content = _TOOL_CALL_REGEX.sub("", stripped).strip()
+        # Suppress any hallucinated tool result simulation after tool call
+        if clean_content and ("Tool result (" in clean_content or "Tool Result (" in clean_content):
+            lines = []
+            for line in clean_content.splitlines():
+                if line.startswith("Tool result (") or line.startswith("Tool Result ("):
+                    break
+                lines.append(line)
+            clean_content = "\n".join(lines).strip()
+
         return {
             "role": "assistant",
             "content": clean_content if clean_content else None,
