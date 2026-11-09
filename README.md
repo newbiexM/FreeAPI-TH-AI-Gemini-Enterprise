@@ -1,87 +1,59 @@
-# Hermes AiPASS & Gemini Enterprise
+# Hermes Gemini Enterprise Provider Bridge
 
 An unofficial standalone [Hermes Agent](https://github.com/NousResearch/hermes-agent)
-provider for TH-AI Passport and Gemini Enterprise. It exposes authenticated
-models as a local OpenAI-compatible endpoint, so Hermes can use text models,
-stream replies, and run its normal tool loop across CLI, TUI, Desktop, and WebUI.
+provider exclusively dedicated to **Gemini Enterprise** models (`gemini-4-argon`, `gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, and `gemini-3.1-pro-preview`).
 
-> [!WARNING]
-> AiPASS does not publish this as a public API. This plugin follows the same
-> internal routes as the web application. Those routes can change without
-> notice. Use it only with your own account and review the applicable terms.
+It exposes an authenticated local OpenAI-compatible endpoint, enabling Hermes to leverage Gemini Enterprise reasoning, extended context (1M tokens), and streaming across CLI, TUI, Desktop, and WebUI without interference from third-party commercial LLMs.
+
+> [!NOTE]
+> This bridge connects directly to Gemini Enterprise infrastructure with Mac-assisted authentication (Brave Browser session extraction on port 9222 and Keychain / `auth.json` fallback).
+
+## Supported Models
+
+| Model ID | Display Name | Role & Reasoning | Context |
+| :--- | :--- | :--- | :--- |
+| `gemini-4-argon` | Gemini 4 Argon | Flagship: High Reasoning & Agentic Workflows (`low`, `medium`, `high`, `max`) | 1M |
+| `gemini-3.8-flash` | Gemini 3.8 Flash (**Default**) | Fast, versatile, primary agent model (`low`, `medium`, `high`) | 1M |
+| `gemini-3.5-flash` | Gemini 3.5 Flash | Balanced general-purpose model (`low`, `medium`, `high`) | 1M |
+| `gemini-3.5-flash-lite` | Gemini 3.5 Flash Lite | Ultra-fast zero-credit response (`low`, `medium`, `high`) | 1M |
+| `gemini-3.1-pro-preview` | Gemini 3.1 Pro Preview | Complex coding, reasoning & mathematics (`low`, `medium`, `high`, `max`) | 1M |
 
 ## Requirements
 
 - macOS or Linux Container with Mac-assisted authentication
 - Hermes Agent (CLI, TUI, Desktop, or WebUI)
-- Brave Browser (default, via remote debugging port 9222) or Google Chrome
-- An active TH-AI Passport account with Gemini Enterprise access
+- Brave Browser (default, via remote debugging port 9222)
+- An active account with Gemini Enterprise access
 
-## Install
+## Quickstart
 
 ```bash
-hermes plugins install newbiexM/Hermes_TH-AI-pass_Gemini-Enterprise --enable
+# 1. Setup & Login via Brave Browser
 hermes aipass setup --set-default
 hermes aipass login
+
+# 2. Run Hermes with Gemini Enterprise
+hermes -m gemini-enterprise/gemini-3.8-flash
+hermes -z "สรุป repository นี้ให้หน่อย"
 ```
 
-After login, authentication credentials are saved securely in macOS Keychain with `auth.json` file fallback for container portability. Start Hermes normally:
-
-```bash
-hermes
-hermes -m aipass/gpt-6.1-sol
-hermes -m aipass-gemini-enterprise/gemini-3.8-flash
-hermes -z "Summarize this repository"
-```
-
-Use `/model` inside Hermes to select between **TH-AI Passport** models and **AiPASS Gemini Enterprise** models.
+Use `/model` inside Hermes to switch between Gemini Enterprise models.
 
 ## Management
 
 ```bash
 hermes aipass status
-hermes aipass models --refresh
+hermes aipass models
 hermes aipass doctor
 hermes aipass restart
 hermes aipass logout
 ```
 
-The bridge listens only on `127.0.0.1:8792`. Authentication secrets are stored
-in macOS Keychain. Runtime state and redacted logs live below `HERMES_HOME`.
+The bridge daemon listens on `127.0.0.1:8792`. Credentials are stored securely in macOS Keychain with file fallback (`auth.json`) for container synchronization.
 
-## Reasoning levels
+## Reasoning Levels
 
-Hermes reasoning levels are mapped to levels advertised by each AiPASS model:
-`low`, `medium`, `high`, and `max`. Unsupported values are clamped to the
-nearest available level. Models without thinking metadata use their web default.
-
-## Troubleshooting
-
-- **401 / session expired:** run `hermes aipass login` again.
-- **403 / request denied:** the selected model may require paid credits or
-  additional account access. Confirm that it works in the AiPASS web chat.
-- **Bridge unavailable:** run `hermes aipass restart`, then `hermes aipass doctor`.
-- **Missing model:** run `hermes aipass models --refresh`; unavailable and
-  non-conversation models are intentionally hidden.
-- **Protocol mismatch:** AiPASS may have changed its internal transport. Run
-  `hermes aipass doctor` and include its redacted output in a bug report.
-
-## Uninstall
-
-```bash
-hermes aipass stop
-hermes plugins remove hermes-aipass
-```
-
-`logout` is deliberately separate so an update or uninstall does not silently
-delete account credentials or conversation mappings.
-
-## Known limitations
-
-- macOS only in v0.1.
-- One upstream request is processed at a time.
-- Image, video, music, and workflow-specific deep-research models are excluded.
-- Internal AiPASS route changes may temporarily break the plugin.
+Hermes reasoning levels map cleanly to Gemini Enterprise thinking configurations: `low`, `medium`, `high`, and `max`. Unsupported values clamp to the nearest valid level.
 
 ## License
 

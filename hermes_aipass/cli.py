@@ -224,7 +224,7 @@ def _doctor() -> int:
         validate_auth(state)
         checks.append(("authentication", True, state.expires_at or "server-managed"))
         models = AiPassClient().models(refresh=True)
-        checks.append(("model protocol", bool(models), f"{len(models)} conversation models"))
+        checks.append(("model protocol", bool(models), f"{len(models)} Gemini Enterprise models"))
     except (AuthError, ProtocolError) as exc:
         checks.append(("authentication/upstream", False, str(exc)))
     failed = False

@@ -12,6 +12,9 @@ license = { text = "MIT" }
 authors = [{ name = "Yeet2042" }]
 dependencies = []
 
+[tool.setuptools.packages.find]
+include = ["hermes_aipass*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

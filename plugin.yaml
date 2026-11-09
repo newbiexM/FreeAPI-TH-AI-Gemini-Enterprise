@@ -2,11 +2,11 @@ name: hermes-aipass
 version: 0.1.0
 manifest_version: 1
 api_version: 1
-description: "Use TH-AI Passport & Gemini Enterprise models as native Hermes providers through authenticated web transport."
+description: "Hermes Agent provider bridge exclusively for Gemini Enterprise models via authenticated transport."
 author: Timothy Pratumrut / Yeet2042
 license: MIT
 homepage: https://github.com/newbiexM/Hermes_TH-AI-pass_Gemini-Enterprise
-tags: [provider, aipass, gemini-enterprise, thailand, cli]
+tags: [provider, gemini-enterprise, google, ai, cli]
 config_schema:
   bridge_host:
     type: str

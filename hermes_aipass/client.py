@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 
 from .auth import BASE_URL, AuthError, KeychainStore, apply_set_cookie
 from .codec import decode_loader_bytes, extract_stream_events, text_delta, walk
-from .models import Model, extract_models
+from .models import GEMINI_ENTERPRISE_MODELS, Model, extract_models
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -79,27 +79,22 @@ class AiPassClient:
             raise ProtocolError(f"AiPASS request failed: {exc}") from exc
 
     def models(self, *, refresh: bool = False) -> list[Model]:
-        with self._lock:
-            now = time.monotonic()
-            if self._models and not refresh and now - self._models_at < self.model_cache_ttl:
-                return list(self._models)
-            url = f"{BASE_URL}/loaders/list-models.data?_routes=routes%2Floaders%2Flist-models"
-            request = Request(url, headers=self._headers())
-            with self._open(request) as response:
-                decoded = decode_loader_bytes(response.read())
-            models = extract_models(decoded)
-            if not models:
-                raise ProtocolError("AiPASS model loader returned no usable conversation models")
-            self._models = models
-            self._models_at = now
-            return list(models)
+        return list(GEMINI_ENTERPRISE_MODELS)
 
     def model(self, model_id: str) -> Model:
         for model in self.models():
             if model.id == model_id:
                 return model
-        available = ", ".join(model.id for model in self.models()[:12])
-        raise ProtocolError(f"AiPASS model {model_id!r} is unavailable. Available models: {available}")
+        normalized = model_id.lower()
+        for prefix in ("gemini-enterprise/", "aipass-gemini-enterprise/", "gemini/", "aipass/"):
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix):]
+                break
+        for model in self.models():
+            if model.id == normalized:
+                return model
+        available = ", ".join(model.id for model in self.models())
+        raise ProtocolError(f"Gemini Enterprise model {model_id!r} is unavailable. Available models: {available}")
 
     @staticmethod
     def _multipart(fields: dict[str, str]) -> tuple[bytes, str]:
@@ -130,7 +125,15 @@ class AiPassClient:
                     return candidate
         return None
 
+    @staticmethod
+    def _clean_model_id(model_id: str) -> str:
+        for prefix in ("gemini-enterprise/", "aipass-gemini-enterprise/", "gemini/", "aipass/"):
+            if model_id.lower().startswith(prefix):
+                return model_id[len(prefix):]
+        return model_id
+
     def create_conversation(self, prompt: str, model_id: str) -> str:
+        model_id = self._clean_model_id(model_id)
         request_id = uuid.uuid4().hex
         body, content_type = self._multipart(
             {
@@ -163,6 +166,7 @@ class AiPassClient:
         *,
         thinking_level: str | None = None,
     ) -> Iterator[str]:
+        model_id = self._clean_model_id(model_id)
         message_id = uuid.uuid4().hex
         body: dict[str, Any] = {
             "id": conversation_id,

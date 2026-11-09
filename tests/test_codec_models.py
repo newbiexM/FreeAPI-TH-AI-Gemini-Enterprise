@@ -14,11 +14,11 @@ class CodecModelTests(unittest.TestCase):
             [3],
             {"_4": 5, "_6": 7, "_8": 9, "_10": 11, "_12": 13},
             "id",
-            "gpt-5.6-sol",
+            "gemini-3.8-flash",
             "displayName",
-            "GPT-5.6 Sol",
+            "Gemini 3.8 Flash",
             "provider",
-            "openai",
+            "google",
             "ready",
             True,
             "thinkingConfig",
@@ -32,11 +32,12 @@ class CodecModelTests(unittest.TestCase):
         ]
         decoded = decode_loader_bytes(json.dumps(payload).encode())
         models = extract_models(decoded)
-        self.assertEqual([model.id for model in models], ["gpt-5.6-sol"])
+        self.assertEqual([model.id for model in models], ["gemini-3.8-flash"])
         self.assertEqual(models[0].thinking_levels, ("low", "medium", "high"))
 
     def test_filters_non_conversation_models(self):
         excluded = [
+            "gpt-5.6-sol",
             "gpt-image-2",
             "gemini-3-pro-image",
             "seedance-2.0",
@@ -45,10 +46,12 @@ class CodecModelTests(unittest.TestCase):
             "lyria-3-pro-preview",
             "sonar-deep-research",
             "openai-deep-research",
+            "DeepSeek-V3.2",
+            "sonar-reasoning-pro",
         ]
         self.assertTrue(all(not is_conversation_model(item) for item in excluded))
-        self.assertTrue(is_conversation_model("DeepSeek-V3.2"))
-        self.assertTrue(is_conversation_model("sonar-reasoning-pro"))
+        self.assertTrue(is_conversation_model("gemini-3.8-flash"))
+        self.assertTrue(is_conversation_model("gemini-4-argon"))
 
     def test_reasoning_is_clamped(self):
         model = Model(

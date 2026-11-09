@@ -71,21 +71,25 @@ def _reasoning_effort(body: dict[str, Any]) -> str | None:
 def _normalize_model_id(model_id: str) -> str:
     """Accept both Hermes' bare ``-m`` value and ``provider/model`` form."""
     prefixes = (
+        "gemini-enterprise/",
+        "gemini/",
         "aipass-gemini-enterprise/",
         "aipass_gemini_enterprise/",
         "aipass-ge/",
-        "gemini-enterprise/",
         "aipass/",
     )
     lower = model_id.lower()
     for prefix in prefixes:
         if lower.startswith(prefix):
-            return model_id[len(prefix):]
+            model_id = model_id[len(prefix):]
+            break
+    if not model_id or model_id.lower() == "auto":
+        return "gemini-3.8-flash"
     return model_id
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "HermesAiPASS/0.1"
+    server_version = "HermesGeminiEnterprise/0.1"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         # Do not log headers, bodies, account data, or query strings.
