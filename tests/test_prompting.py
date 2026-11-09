@@ -1,6 +1,11 @@
 import unittest
 
-from hermes_aipass.prompting import TOOL_SENTINEL, bootstrap_prompt, parse_assistant
+from hermes_aipass.prompting import (
+    TOOL_SENTINEL,
+    bootstrap_prompt,
+    parse_assistant,
+    prune_tool_content,
+)
 
 
 TOOLS = [
@@ -50,7 +55,58 @@ class PromptingTests(unittest.TestCase):
                 {"terminal"},
             )
 
+    def test_parses_embedded_tool_call_tags(self):
+        raw = (
+            "I will check the files now.\n"
+            "<tool_call>{\"id\": \"call_123\", \"name\": \"terminal\", \"arguments\": {\"command\": \"ls -la\"}}</tool_call>"
+        )
+        message = parse_assistant(raw, {"terminal"})
+        self.assertEqual(message["content"], "I will check the files now.")
+        self.assertEqual(len(message["tool_calls"]), 1)
+        self.assertEqual(message["tool_calls"][0]["id"], "call_123")
+        self.assertEqual(message["tool_calls"][0]["function"]["name"], "terminal")
+        self.assertEqual(message["tool_calls"][0]["function"]["arguments"], '{"command":"ls -la"}')
+
+    def test_parses_nested_function_tool_call_tags(self):
+        raw = '<tool_call>{"id": "call_456", "type": "function", "function": {"name": "terminal", "arguments": "{\\"command\\": \\"git status\\"}"}}</tool_call>'
+        message = parse_assistant(raw, {"terminal"})
+        self.assertIsNone(message["content"])
+        self.assertEqual(message["tool_calls"][0]["id"], "call_456")
+        self.assertEqual(message["tool_calls"][0]["function"]["name"], "terminal")
+        self.assertEqual(message["tool_calls"][0]["function"]["arguments"], '{"command":"git status"}')
+
+    def test_prunes_historical_tool_outputs(self):
+        # Create 10 tool outputs of length 500
+        messages = [{"role": "user", "content": "Run tests"}]
+        for i in range(10):
+            messages.append({"role": "assistant", "tool_calls": [{"id": f"c_{i}", "function": {"name": "terminal"}}]})
+            messages.append({"role": "tool", "name": "terminal", "content": f"output_{i} " * 50})
+
+        prompt = bootstrap_prompt(messages, TOOLS)
+        # The earliest tool results (output_0, output_1) should be pruned
+        self.assertIn("output_0", prompt)
+        self.assertIn("tool output truncated", prompt)
+        # The latest tool results (output_8, output_9) should remain intact without truncation
+        self.assertIn("output_9", prompt)
+
+    def test_caps_giant_tool_output(self):
+        giant = "X" * 30000
+        pruned = prune_tool_content(giant, is_recent=True)
+        self.assertLess(len(pruned), 20000)
+        self.assertIn("large tool output truncated: 30000 chars", pruned)
+        self.assertTrue(pruned.startswith("X" * 100))
+        self.assertTrue(pruned.endswith("X" * 100))
+
+    def test_active_objective_anchoring(self):
+        messages = [
+            {"role": "user", "content": "Find the secret key in config"},
+            {"role": "assistant", "tool_calls": [{"id": "c1", "function": {"name": "terminal"}}]},
+            {"role": "tool", "name": "terminal", "content": "file not found"},
+        ]
+        prompt = bootstrap_prompt(messages, TOOLS)
+        self.assertIn("### ACTIVE OBJECTIVE:", prompt)
+        self.assertIn("Find the secret key in config", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
 import json
 import os
@@ -35,13 +36,18 @@ class BridgeRuntime:
     def __init__(self, client: AiPassClient | None = None, sessions: SessionStore | None = None) -> None:
         self.client = client
         self.sessions = sessions or SessionStore()
-        self.queue = threading.Lock()
+        self._session_locks: dict[str, threading.Lock] = collections.defaultdict(threading.Lock)
+        self._locks_mutex = threading.Lock()
         self.started_at = time.time()
 
     def get_client(self) -> AiPassClient:
         if self.client is None:
             self.client = AiPassClient()
         return self.client
+
+    def session_lock(self, session_id: str) -> threading.Lock:
+        with self._locks_mutex:
+            return self._session_locks[session_id]
 
 
 RUNTIME = BridgeRuntime()
@@ -232,8 +238,9 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def _regular_completion(self, body: dict[str, Any], messages: list[dict[str, Any]], model_id: str) -> None:
-        with RUNTIME.queue:
-            conversation_id, deltas, allowed, session_id, _ = self._execute(body, messages, model_id)
+        session_id = self._session_id(messages)
+        with RUNTIME.session_lock(session_id):
+            conversation_id, deltas, allowed, _, _ = self._execute(body, messages, model_id)
             raw = "".join(deltas)
             message = parse_assistant(raw, allowed)
             self._complete_state(
@@ -267,6 +274,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def _stream_completion(self, body: dict[str, Any], messages: list[dict[str, Any]], model_id: str) -> None:
+        session_id = self._session_id(messages)
         completion_id = f"chatcmpl-{uuid.uuid4()}"
         created = int(time.time())
         self.send_response(200)
@@ -276,13 +284,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         raw = ""
         natural_started = False
-        with RUNTIME.queue:
+        with RUNTIME.session_lock(session_id):
             try:
-                conversation_id, deltas, allowed, session_id, _ = self._execute(body, messages, model_id)
+                conversation_id, deltas, allowed, _, _ = self._execute(body, messages, model_id)
                 for delta in deltas:
                     raw += delta
                     stripped = raw.lstrip()
-                    may_be_tool = TOOL_SENTINEL.startswith(stripped) or stripped.startswith(TOOL_SENTINEL)
+                    may_be_tool = (
+                        TOOL_SENTINEL.startswith(stripped)
+                        or stripped.startswith(TOOL_SENTINEL)
+                        or "<tool_call>".startswith(stripped)
+                        or stripped.startswith("<tool_call>")
+                    )
                     if not natural_started and stripped and not may_be_tool:
                         natural_started = True
                         self._sse(
@@ -306,6 +319,16 @@ class Handler(BaseHTTPRequestHandler):
                         )
                 message = parse_assistant(raw, allowed)
                 if message.get("tool_calls"):
+                    if message.get("content") and not natural_started:
+                        self._sse(
+                            {
+                                "id": completion_id,
+                                "object": "chat.completion.chunk",
+                                "created": created,
+                                "model": model_id,
+                                "choices": [{"index": 0, "delta": {"role": "assistant", "content": message["content"]}, "finish_reason": None}],
+                            }
+                        )
                     self._sse(
                         {
                             "id": completion_id,
