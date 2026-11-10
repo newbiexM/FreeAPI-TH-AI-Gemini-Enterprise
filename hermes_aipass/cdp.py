@@ -196,31 +196,46 @@ def interactive_login(port: int = 9222, timeout: int = 300) -> dict:
             try:
                 pages = _targets(port)
                 page = next(
-                    (item for item in pages if item.get("type") == "page" and "de.aipass.net" in item.get("url", "")),
+                    (
+                        item
+                        for item in pages
+                        if item.get("type") == "page"
+                        and ("vertexaisearch.cloud.google" in item.get("url", "") or "de.aipass.net" in item.get("url", ""))
+                    ),
                     None,
                 )
-                if page and "/chat" in page.get("url", "") and "/sign-in" not in page.get("url", ""):
-                    client = WebSocket(page["webSocketDebuggerUrl"])
-                    session = client.call(
-                        "Runtime.evaluate",
-                        {
-                            "expression": "fetch('/api/v1/auth/get-session').then(r => r.ok)",
-                            "awaitPromise": True,
-                            "returnByValue": True,
-                        },
-                    )
-                    if session.get("result", {}).get("value") is True:
-                        cookies = client.call("Network.getCookies", {"urls": ["https://de.aipass.net"]}).get("cookies", [])
-                        if not cookies:
+                if page:
+                    page_url = page.get("url", "")
+                    is_ge = "vertexaisearch.cloud.google" in page_url
+                    is_aipass_chat = "/chat" in page_url and "/sign-in" not in page_url
+                    if is_ge or is_aipass_chat:
+                        client = WebSocket(page["webSocketDebuggerUrl"])
+                        is_valid = is_ge
+                        if not is_valid:
+                            session = client.call(
+                                "Runtime.evaluate",
+                                {
+                                    "expression": "fetch('/api/v1/auth/get-session').then(r => r.ok)",
+                                    "awaitPromise": True,
+                                    "returnByValue": True,
+                                },
+                            )
+                            is_valid = session.get("result", {}).get("value") is True
+                        if is_valid:
                             cookies = client.call("Network.getAllCookies").get("cookies", [])
-                        state = state_from_cdp_cookies(cookies)
-                        KeychainStore().save(state)
-                        validate_auth(state)
-                        if not already_running:
-                            client.call("Browser.close")
+                            if not cookies:
+                                cookies = client.call(
+                                    "Network.getCookies",
+                                    {"urls": ["https://de.aipass.net", "https://vertexaisearch.cloud.google"]},
+                                ).get("cookies", [])
+                            state = state_from_cdp_cookies(cookies)
+                            KeychainStore().save(state)
+                            validate_auth(state)
+                            if not already_running:
+                                client.call("Browser.close")
+                            client.close()
+                            return {"valid": True, "expires_at": state.expires_at}
                         client.close()
-                        return {"valid": True, "expires_at": state.expires_at}
-                    client.close()
             except (OSError, ValueError, AuthError):
                 pass
             time.sleep(1)

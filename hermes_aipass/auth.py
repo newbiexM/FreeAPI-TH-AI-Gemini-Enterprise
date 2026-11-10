@@ -26,6 +26,17 @@ ESSENTIAL_COOKIES = {
     "aip_device_id",
     "app_lang",
 }
+DISCOVERY_ENGINE_COOKIES = {
+    "__Host-C_OSES",
+    "__Secure-C_SES",
+    "OSES",
+    "CSES",
+    "SAPISID",
+    "SSID",
+    "HSID",
+    "APISID",
+    "SID",
+}
 
 
 class AuthError(RuntimeError):
@@ -129,23 +140,40 @@ class KeychainStore:
 def state_from_cdp_cookies(cookies: Iterable[dict]) -> AuthState:
     selected: dict[str, str] = {}
     auth_expiry: float | None = None
+    has_aipass_auth = False
+    has_ge_auth = False
+
     for item in cookies:
         name = str(item.get("name") or "")
-        domain = str(item.get("domain") or "")
-        if name not in ESSENTIAL_COOKIES or not domain.endswith("aipass.net"):
-            continue
+        domain = str(item.get("domain") or "").lower()
         value = item.get("value")
-        if isinstance(value, str) and value:
+        if not isinstance(value, str) or not value:
+            continue
+
+        if name in ESSENTIAL_COOKIES and domain.endswith("aipass.net"):
             selected[name] = value
-        if name == "__Secure-ai_passport_auth.session_token":
+            if name == "__Secure-ai_passport_auth.session_token":
+                has_aipass_auth = True
+                try:
+                    expiry = float(item.get("expires") or 0)
+                    if expiry > 0:
+                        auth_expiry = expiry
+                except (TypeError, ValueError):
+                    pass
+
+        if name in DISCOVERY_ENGINE_COOKIES and ("google" in domain or "cloud.google" in domain):
+            selected[name] = value
+            has_ge_auth = True
             try:
                 expiry = float(item.get("expires") or 0)
-                if expiry > 0:
+                if expiry > 0 and (auth_expiry is None or expiry > auth_expiry):
                     auth_expiry = expiry
             except (TypeError, ValueError):
                 pass
-    if "__Secure-ai_passport_auth.session_token" not in selected:
-        raise AuthError("AiPASS login did not produce an authentication cookie")
+
+    if not has_aipass_auth and not has_ge_auth:
+        raise AuthError("Login did not produce an AiPASS or Gemini Enterprise authentication cookie")
+
     expires_at = (
         datetime.fromtimestamp(auth_expiry, tz=timezone.utc).isoformat()
         if auth_expiry else None
@@ -181,6 +209,9 @@ def apply_set_cookie(state: AuthState, headers: Iterable[str]) -> bool:
 
 
 def validate_auth(state: AuthState, timeout: float = 15) -> dict:
+    if any(k in state.cookies for k in ("__Host-C_OSES", "__Secure-C_SES", "OSES", "CSES")):
+        return {"valid": True, "expires_at": state.expires_at, "tenant": "discovery_engine"}
+
     request = Request(
         f"{BASE_URL}/api/v1/auth/get-session",
         headers={
