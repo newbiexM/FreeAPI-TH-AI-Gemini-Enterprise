@@ -157,6 +157,11 @@ def openai_to_anthropic_response(openai_resp: dict[str, Any]) -> dict[str, Any]:
         completion_id = "msg_" + completion_id[len("chatcmpl-"):]
 
     content_blocks: list[dict[str, Any]] = []
+    if msg.get("reasoning_content"):
+        content_blocks.append({
+            "type": "thinking",
+            "thinking": str(msg["reasoning_content"]),
+        })
     if msg.get("content"):
         content_blocks.append({
             "type": "text",

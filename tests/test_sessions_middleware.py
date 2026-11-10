@@ -66,6 +66,29 @@ class SessionMiddlewareTests(unittest.TestCase):
         self.assertNotIn("secret answer", state)
         self.assertIn(message_fingerprint(message), state)
 
+    def test_normalize_model_id_supports_freeapi_prefixes(self):
+        self.assertEqual(_normalize_model_id("freeapi/gemini-4-argon"), "gemini-4-argon")
+        self.assertEqual(_normalize_model_id("freeapi-th-ai-gemini-enterprise/gemini-3.8-flash"), "gemini-3.8-flash")
+
+    def test_model_change_forces_bootstrap(self):
+        first = [{"role": "user", "content": "hello"}]
+        store = SessionStore()
+        store.complete(
+            "session-b",
+            conversation_id="chat-1",
+            model="gemini-3.8-flash",
+            request_messages=first,
+            response_message={"role": "assistant", "content": "hi"},
+        )
+        current = first + [{"role": "assistant", "content": "hi"}, {"role": "user", "content": "next"}]
+        # Same model: bootstrap is False
+        _, _, b1 = store.prepare("session-b", current, model="gemini-3.8-flash")
+        self.assertFalse(b1)
+        # Switched model: bootstrap is True!
+        _, _, b2 = store.prepare("session-b", current, model="gemini-4-argon")
+        self.assertTrue(b2)
+
+
     def test_middleware_only_modifies_aipass(self):
         result = attach_session_header(
             request={"model": "gpt"},

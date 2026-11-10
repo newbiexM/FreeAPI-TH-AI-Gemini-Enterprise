@@ -104,6 +104,30 @@ class TestAnthropicAdapter(unittest.TestCase):
         self.assertEqual(anth_resp["content"][1]["name"], "read_file")
         self.assertEqual(anth_resp["content"][1]["input"], {"path": "/tmp/a.txt"})
 
+    def test_openai_to_anthropic_response_with_thinking_block(self):
+        openai_resp = {
+            "id": "chatcmpl-789",
+            "model": "gemini-4-argon",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "Final clean answer.",
+                        "reasoning_content": "Internal thinking process.",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+        anth_resp = openai_to_anthropic_response(openai_resp)
+        self.assertEqual(len(anth_resp["content"]), 2)
+        self.assertEqual(anth_resp["content"][0]["type"], "thinking")
+        self.assertEqual(anth_resp["content"][0]["thinking"], "Internal thinking process.")
+        self.assertEqual(anth_resp["content"][1]["type"], "text")
+        self.assertEqual(anth_resp["content"][1]["text"], "Final clean answer.")
+
+
     def test_bridge_count_tokens_and_messages_endpoints(self):
         import io
         from unittest.mock import MagicMock, patch

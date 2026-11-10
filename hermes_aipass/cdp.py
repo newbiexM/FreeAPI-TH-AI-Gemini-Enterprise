@@ -129,13 +129,13 @@ def _browser_binary() -> Path:
     candidates = [
         Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
         Path.home() / "Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-        Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-        Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        Path("/usr/bin/brave-browser"),
+        Path("/usr/bin/brave"),
     ]
     for path in candidates:
         if path.exists():
             return path
-    raise AuthError("Brave Browser is required for AiPASS login")
+    raise AuthError("Brave Browser is required for AiPASS login (Chrome is disallowed)")
 
 
 def _targets(port: int) -> list[dict]:

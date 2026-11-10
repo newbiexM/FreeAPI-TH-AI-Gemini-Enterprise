@@ -13,5 +13,12 @@ def register(ctx) -> None:
         handler_fn=dispatch,
         description="Authenticate and use TH-AI Passport models from Hermes.",
     )
+    ctx.register_cli_command(
+        name="freeapi",
+        help="Set up and manage the FreeAPI TH-AI Gemini Enterprise provider",
+        setup_fn=register_cli,
+        handler_fn=dispatch,
+        description="Manage FreeAPI TH-AI Gemini Enterprise proxy bridge.",
+    )
     ctx.register_middleware("llm_request", attach_session_header)
 

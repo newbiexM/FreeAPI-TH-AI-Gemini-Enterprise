@@ -92,6 +92,9 @@ def _reasoning_effort(body: dict[str, Any]) -> str | None:
 def _normalize_model_id(model_id: str) -> str:
     """Accept both Hermes' bare ``-m`` value and ``provider/model`` form."""
     prefixes = (
+        "freeapi-th-ai-gemini-enterprise/",
+        "freeapi/",
+        "th-ai/",
         "gemini-enterprise/",
         "gemini/",
         "aipass-gemini-enterprise/",
@@ -239,7 +242,7 @@ class Handler(BaseHTTPRequestHandler):
         raw_tools = body.get("tools")
         tools: list[dict[str, Any]] = [t for t in raw_tools if isinstance(t, dict)] if isinstance(raw_tools, list) else []
         allowed = tool_names(tools)
-        session, tail, bootstrap = RUNTIME.sessions.prepare(session_id, messages)
+        session, tail, bootstrap = RUNTIME.sessions.prepare(session_id, messages, model=model_id)
         if bootstrap:
             prompt = bootstrap_prompt(messages, tools)
             conversation_id = client.create_conversation(CONVERSATION_SEED, model_id)
@@ -784,6 +787,7 @@ class Handler(BaseHTTPRequestHandler):
 def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise SystemExit("Refusing to expose the credentialed AiPASS bridge beyond localhost")
+    ThreadingHTTPServer.allow_reuse_address = True
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"Hermes AiPASS bridge {__version__} listening on http://{host}:{port}/v1", flush=True)
     try:

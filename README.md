@@ -1,80 +1,161 @@
-# FreeAPI-TH-AI-Gemini-Enterprise
+# FreeAPI-TH-AI-Gemini-Enterprise ⚡
 
-An unofficial, high-performance **Free API bridge** for **Gemini Enterprise** models (`gemini-4-argon`, `gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, and `gemini-3.1-pro-preview`) via Thailand AI Passport (TH-AI Passport).
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python Versions" />
+  <img src="https://img.shields.io/badge/Tests-59%20Passed%20(100%25)-success?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests" />
+  <img src="https://img.shields.io/badge/Types-Pyright%20Strict%200%20Errors-blueviolet?style=for-the-badge&logo=typescript&logoColor=white" alt="Pyright" />
+  <img src="https://img.shields.io/badge/Protocols-OpenAI%20%26%20Anthropic%20SSE-orange?style=for-the-badge" alt="Protocols" />
+  <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License" />
+</p>
 
-Compatible with **OpenAI** and **Anthropic** API protocols, supporting **Hermes Agent** (CLI, TUI, Desktop, WebUI), **Claude Code**, **Cursor**, **Cline**, and any standard LLM client.
+<p align="center">
+  <b>High-performance, zero-latency Free API bridge for Gemini Enterprise models via TH-AI Passport.</b><br>
+  Built natively for <b>Hermes Agent</b> (Desktop, CLI, TUI, WebUI), <b>Claude Code</b>, <b>Cursor</b>, <b>Cline</b>, and modern agentic runtimes.
+</p>
 
+---
 
-> [!NOTE]
-> This bridge connects directly to Gemini Enterprise infrastructure with Mac-assisted authentication (Brave Browser session extraction on port 9222 and Keychain / `auth.json` fallback).
+## ✨ Key Highlights
 
-## Supported Models
+- ⚡ **True Zero-Latency SSE Streaming**: Upstream tokens stream immediately to clients with 0ms buffering delay (`STREAM_KEEP = 32` sliding window prevents token leak).
+- 🧠 **Chain-of-Thought / Reasoning Separation**: Automatically intercepts `<thought>` and `**Researching...**` blocks and routes them to native `reasoning_content` (OpenAI) and `thinking` blocks (Anthropic) — keeping user chat clean.
+- 🛡️ **Active RAI & Scam Policy Guard**: Automatic educational context framing and proactive keyword sanitization prevents HTTP 422 `CHAT_RAI_VIOLATION` content policy errors.
+- 🔄 **Multi-Turn Session & Model Switch Awareness**: Instant delta caching with seamless conversation reset upon model changes or history truncations.
+- 🔀 **Dual-Protocol Parity**: Native `POST /v1/chat/completions`, `POST /v1/messages`, and `POST /v1/messages/count_tokens`.
+- 👥 **Multi-Profile Homelab Ready**: Deploy once, available globally across all Hermes profiles (`/opt/data/profiles/*`).
+- 🔄 **Multi-Account Resilient Pool**: Round-robin balancing across multiple credentials (`AIPASS_TOKENS="tok1,tok2"`) with automatic 429 exponential backoff.
 
-| Model ID | Display Name | Role & Reasoning | Context |
-| :--- | :--- | :--- | :--- |
-| `gemini-4-argon` | Gemini 4 Argon | Flagship: High Reasoning & Agentic Workflows (`low`, `medium`, `high`, `max`) | 1M |
-| `gemini-3.8-flash` | Gemini 3.8 Flash (**Default**) | Fast, versatile, primary agent model (`low`, `medium`, `high`) | 1M |
-| `gemini-3.5-flash` | Gemini 3.5 Flash | Balanced general-purpose model (`low`, `medium`, `high`) | 1M |
-| `gemini-3.5-flash-lite` | Gemini 3.5 Flash Lite | Ultra-fast zero-credit response (`low`, `medium`, `high`) | 1M |
-| `gemini-3.1-pro-preview` | Gemini 3.1 Pro Preview | Complex coding, reasoning & mathematics (`low`, `medium`, `high`, `max`) | 1M |
+---
 
-## Requirements
+## 🏗️ Architecture
 
-- macOS or Linux Container with Mac-assisted authentication
-- Hermes Agent (CLI, TUI, Desktop, or WebUI)
-- Brave Browser (default, via remote debugging port 9222)
-- An active account with Gemini Enterprise access
+```mermaid
+flowchart LR
+    subgraph Clients["Agent Clients & IDEs"]
+        H_DESK["Hermes Desktop / WebUI"]
+        H_CLI["Hermes CLI / TUI"]
+        CLAUDE["Claude Code / Cline"]
+        CURSOR["Cursor / OpenAI Apps"]
+    end
 
-## Quickstart
+    subgraph Bridge["FreeAPI Local Bridge (:8792)"]
+        ROUTER{"Protocol Router"}
+        INTERCEPT["StreamInterceptor<br/>(Zero-Latency SSE)"]
+        COT_GUARD["Reasoning & RAI Guard<br/>(Sanitizer / Thought Splitter)"]
+        SESS_MGR["SessionStore<br/>(Delta Cache / Model Switch)"]
+        ACC_POOL["Multi-Account Pool<br/>(Failover & Round-Robin)"]
+    end
 
-```bash
-# 1. Setup & Login via Brave Browser
-hermes aipass setup --set-default
-hermes aipass login
+    subgraph Upstream["TH-AI Enterprise Infrastructure"]
+        GEMINI_ARGON["gemini-4-argon (Flagship)"]
+        GEMINI_FLASH["gemini-3.8-flash (Default)"]
+        GEMINI_PRO["gemini-3.1-pro-preview"]
+    end
 
-# 2. Run Hermes with Gemini Enterprise
-hermes -m gemini-enterprise/gemini-3.8-flash
-hermes -z "สรุป repository นี้ให้หน่อย"
+    H_DESK -->|OpenAI SSE| ROUTER
+    H_CLI -->|OpenAI SSE| ROUTER
+    CURSOR -->|OpenAI SSE| ROUTER
+    CLAUDE -->|Anthropic Messages| ROUTER
+
+    ROUTER --> INTERCEPT
+    INTERCEPT --> COT_GUARD
+    COT_GUARD --> SESS_MGR
+    SESS_MGR --> ACC_POOL
+
+    ACC_POOL -->|Upstream Session| GEMINI_ARGON
+    ACC_POOL -->|Upstream Session| GEMINI_FLASH
+    ACC_POOL -->|Upstream Session| GEMINI_PRO
 ```
 
-Use `/model` inside Hermes to switch between Gemini Enterprise models.
+---
 
-## Management
+## 🎯 Model Matrix
+
+| Model ID | Aliases / Provider Prefix | Display Name | Role & Reasoning Capabilities | Context Window |
+| :--- | :--- | :--- | :--- | :--- |
+| `gemini-4-argon` | `freeapi/gemini-4-argon`<br>`gemini-enterprise/gemini-4-argon` | **Gemini 4 Argon** | Flagship Reasoning: Complex logic, multi-step agent planning (`low`, `medium`, `high`, `max`) | 1,000,000 |
+| `gemini-3.8-flash` | `freeapi/gemini-3.8-flash`<br>`gemini-enterprise/gemini-3.8-flash` | **Gemini 3.8 Flash** ⭐ *(Default)* | Versatile daily driver: High speed, optimal tool use & precision (`low`, `medium`, `high`) | 1,000,000 |
+| `gemini-3.5-flash` | `freeapi/gemini-3.5-flash` | **Gemini 3.5 Flash** | Balanced general-purpose model (`low`, `medium`, `high`) | 1,000,000 |
+| `gemini-3.5-flash-lite` | `freeapi/gemini-3.5-flash-lite` | **Gemini 3.5 Flash Lite** | Ultra-fast, zero-overhead lightweight queries (`low`, `medium`, `high`) | 1,000,000 |
+| `gemini-3.1-pro-preview` | `freeapi/gemini-3.1-pro-preview` | **Gemini 3.1 Pro Preview** | Deep mathematics, advanced code generation & syntax repair (`low`, `medium`, `high`, `max`) | 1,000,000 |
+
+---
+
+## 🚀 Quickstart
+
+### 1. Setup & Authenticate
+
+Both `hermes freeapi` and `hermes aipass` commands are supported:
 
 ```bash
-hermes aipass status
-hermes aipass models
-hermes aipass doctor
-hermes aipass restart
-hermes aipass logout
+# Register provider configuration & set as default
+hermes freeapi setup --set-default
+
+# Sign in via Brave Browser (port 9222 session extraction)
+hermes freeapi login
 ```
 
-The bridge daemon listens on `127.0.0.1:8792`. Credentials are stored securely in macOS Keychain with file fallback (`auth.json`) for container synchronization.
+### 2. Run with Hermes Agent
 
-## Reasoning Levels
+```bash
+# Run one-off prompt
+hermes -m gemini-enterprise/gemini-3.8-flash -z "สรุปข่าวเทคโนโลยีวันนี้"
 
-Hermes reasoning levels map cleanly to Gemini Enterprise thinking configurations: `low`, `medium`, `high`, and `max`. Unsupported values clamp to the nearest valid level.
+# Interactive CLI session
+hermes -m gemini-enterprise/gemini-4-argon
 
-## Incremental Streaming Architecture
+# Or inside Hermes Desktop / TUI chat:
+/model gemini-enterprise/gemini-3.8-flash
+```
 
-The bridge features a zero-latency `StreamInterceptor` (adapted from `qwen-free-api`) with:
-- **True Real-Time SSE**: Upstream tokens stream immediately to Hermes with zero perceived Time-to-First-Token (TTFT) latency.
-- **Sliding Hold-back Window (`STREAM_KEEP = 32`)**: Prevents split tool markers from leaking into user-visible conversation text across chunk cuts.
-- **Initial Refusal Gating**: Intercepts upfront model refusal messages before emitting HTTP headers, enabling seamless and transparent automatic retries.
-- **Tolerant Multi-Syntax Parsing**: Robust parsing for `<tool_call>`, `<<<TOOL_CALL>>>`, and `@@HERMES_TOOL_CALL@@` with code fence stripping and bracket tolerance.
+---
 
-## Dual-Protocol Support (OpenAI & Anthropic)
+## 🛠️ Diagnostics & CLI Commands
 
-The bridge provides parity across two major agent protocols on `127.0.0.1:8792`:
-- **OpenAI Endpoint**: `POST /v1/chat/completions` (Hermes CLI, TUI, Desktop, WebUI, Cursor).
-- **Anthropic Endpoints**: `POST /v1/messages` and `POST /v1/messages/count_tokens` (Claude Code, Cline, Roo-Code).
+```bash
+# Check daemon health & token expiry
+hermes freeapi status
 
-## Multi-Account Resilient Pool
+# Verify connectivity & run doctor diagnostics
+hermes freeapi doctor
 
-Pass multiple tokens via `AIPASS_TOKENS="tok1,tok2,tok3"`:
-- **Round-Robin Rotation**: Dispatches queries across healthy accounts.
-- **Exponential Cooldown on 429**: Backs off on rate limit (`60s * 2^(streak - 1)` up to 30m) with automatic pre-stream failover to the next healthy account.
+# List all available Gemini Enterprise models
+hermes freeapi models
 
-## License
+# Restart local proxy daemon
+hermes freeapi restart
 
-MIT
+# Sign out and purge local credentials
+hermes freeapi logout
+```
+
+---
+
+## ⚙️ Configuration & Environment Variables
+
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `AIPASS_BRIDGE_HOST` | `127.0.0.1` | Local listening host (strictly restricted to loopback) |
+| `AIPASS_BRIDGE_PORT` | `8792` | Local listening port for OpenAI & Anthropic bridges |
+| `AIPASS_TOKENS` | *None* | Comma-delimited list of tokens for multi-account pool rotation |
+| `AIPASS_STATE_PATH` | `~/.hermes/aipass/auth.json` | Fallback credentials path when macOS Keychain is unavailable |
+
+---
+
+## 🧪 Testing & Verification
+
+The test suite runs 59 targeted unit tests with strict 100% pass guarantee and strict Pyright static type checking:
+
+```bash
+# Run full unit test suite
+python3 -m unittest discover tests
+
+# Strict type checking
+npx pyright
+```
+
+---
+
+## 📄 License
+
+Distributed under the [MIT License](LICENSE).

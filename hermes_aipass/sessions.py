@@ -38,13 +38,18 @@ class SessionStore:
         with self._lock:
             return self._sessions.setdefault(session_id, Session())
 
-    def prepare(self, session_id: str, messages: list[dict[str, Any]]) -> tuple[Session, list[dict[str, Any]], bool]:
+    def prepare(
+        self,
+        session_id: str,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+    ) -> tuple[Session, list[dict[str, Any]], bool]:
         with self._lock:
             session = self.get(session_id)
             current = [message_fingerprint(message) for message in messages]
             previous = session.request_fingerprints
             prefix_matches = len(current) >= len(previous) and current[: len(previous)] == previous
-            if not session.conversation_id or not prefix_matches:
+            if not session.conversation_id or not prefix_matches or (model and session.model and session.model != model):
                 return session, messages, True
             tail = list(messages[len(previous):])
             if tail and tail[0].get("role") == "assistant":
