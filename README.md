@@ -55,6 +55,14 @@ The bridge daemon listens on `127.0.0.1:8792`. Credentials are stored securely i
 
 Hermes reasoning levels map cleanly to Gemini Enterprise thinking configurations: `low`, `medium`, `high`, and `max`. Unsupported values clamp to the nearest valid level.
 
+## Incremental Streaming Architecture
+
+The bridge features a zero-latency `StreamInterceptor` (adapted from `qwen-free-api`) with:
+- **True Real-Time SSE**: Upstream tokens stream immediately to Hermes with zero perceived Time-to-First-Token (TTFT) latency.
+- **Sliding Hold-back Window (`STREAM_KEEP = 32`)**: Prevents split tool markers from leaking into user-visible conversation text across chunk cuts.
+- **Initial Refusal Gating**: Intercepts upfront model refusal messages before emitting HTTP headers, enabling seamless and transparent automatic retries.
+- **Tolerant Multi-Syntax Parsing**: Robust parsing for `<tool_call>`, `<<<TOOL_CALL>>>`, and `@@HERMES_TOOL_CALL@@` with code fence stripping and bracket tolerance.
+
 ## License
 
 MIT
