@@ -34,11 +34,12 @@ class DiscoveryEngineTransport:
         *,
         tenant_id: str | None = None,
         timeout: float = 60.0,
+        auth: Any | None = None,
     ) -> None:
         self.tenant_id = tenant_id or DEFAULT_TENANT_ID
         self.timeout = timeout
         self.store = KeychainStore()
-        self.auth = self.store.load()
+        self.auth = auth if auth is not None else self.store.load()
 
     def _headers(self, *, accept: str = "text/event-stream") -> dict[str, str]:
         cookie = getattr(self.auth, "cookie_header", "")

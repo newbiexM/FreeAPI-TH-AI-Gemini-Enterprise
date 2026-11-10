@@ -4,10 +4,19 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
+from hermes_aipass.auth import AuthState, KeychainStore
 from hermes_aipass.models import Model
 
 
 class TestTransportSeam(unittest.TestCase):
+    def setUp(self):
+        self.mock_auth = AuthState(cookies={"__Host-C_OSES": "mock_val", "__Secure-ai_passport_auth.session_token": "mock_token"})
+        self.load_patch = patch.object(KeychainStore, "load", return_value=self.mock_auth)
+        self.load_patch.start()
+
+    def tearDown(self):
+        self.load_patch.stop()
+
     def test_transport_factory_selection(self):
         from hermes_aipass.transport import Transport, get_transport
         from hermes_aipass.client import AiPassClient
