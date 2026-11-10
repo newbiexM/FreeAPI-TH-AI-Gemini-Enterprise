@@ -97,6 +97,9 @@ _SAFETY_REPLACEMENTS = [
     (re.compile(r"บัตรเครดิต", re.IGNORECASE), "บัตรชำระเงิน"),
     (re.compile(r"โอนเงินค่า(?:ธรรมเนียม|ค้ำประกัน)", re.IGNORECASE), "ค่าใช้จ่ายล่วงหน้า"),
     (re.compile(r"เงินกู้ด่วน|กู้นอกระบบ", re.IGNORECASE), "บริการสินเชื่อ"),
+    # Bank account numbers & financial identifiers (Google DLP & Organization Policy compliance)
+    (re.compile(r"\b(\d{3})[-\s]?(\d)[-\s]?(\d{5})[-\s]?(\d)\b"), r"\1-X-XXXXX-\4"),
+    (re.compile(r"\b(\d{4})[-\s]?(\d{4})[-\s]?(\d{4})[-\s]?(\d{4})\b"), r"\1-XXXX-XXXX-\4"),
 ]
 
 

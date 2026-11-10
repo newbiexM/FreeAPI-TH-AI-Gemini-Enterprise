@@ -120,6 +120,15 @@ class PromptingTests(unittest.TestCase):
         self.assertIn("Analyzing Zed IDE configuration now.", formatted)
         self.assertIn("Previous tool request:", formatted)
 
+    def test_masks_financial_account_pii(self):
+        from hermes_aipass.prompting import sanitize_safety_text
+        raw = "KBank Savings Account (211-1-79651-6), card 1234-5678-9012-3456"
+        sanitized = sanitize_safety_text(raw)
+        self.assertNotIn("211-1-79651-6", sanitized)
+        self.assertIn("211-X-XXXXX-6", sanitized)
+        self.assertNotIn("1234-5678-9012-3456", sanitized)
+        self.assertIn("1234-XXXX-XXXX-3456", sanitized)
+
     def test_tolerant_bracket_and_fenced_tool_parsing(self):
         # 1. Tolerant triple brackets with markdown code fence
         raw1 = "Thinking...\n<<<TOOL_CALL>>>\n```json\n{\"name\": \"terminal\", \"arguments\": {\"command\": \"df -h\"}}\n```\n<<<END_TOOL_CALL>>>"
