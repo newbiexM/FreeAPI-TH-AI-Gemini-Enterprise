@@ -362,4 +362,41 @@ def parse_assistant(raw: str, allowed_tools: set[str]) -> dict[str, Any]:
             )
         return {"role": "assistant", "content": None, "tool_calls": converted}
 
-    return {"role": "assistant", "content": stripped}
+    thought_parts: list[str] = []
+    # Check XML thought
+    xml_m = re.match(r"^\s*<(?:thought|think|reasoning)>([\s\S]*?)</(?:thought|think|reasoning)>\s*", stripped, re.IGNORECASE)
+    if xml_m:
+        thought_parts.append(xml_m.group(1).strip())
+        stripped = stripped[xml_m.end():].strip()
+
+    # Check Markdown thought blocks
+    while True:
+        hdr_m = re.match(r"^\s*\*\*(.+?)\*\*\s*\n+", stripped, re.DOTALL)
+        if hdr_m:
+            title = hdr_m.group(1).strip().lower()
+            words = title.split()
+            if title in {
+                "thought", "thinking", "thinking process", "reasoning",
+                "internal monologue", "chain of thought", "observation", "plan"
+            } or (words and (words[0].endswith("ing") or words[-1].endswith("ing"))):
+                body_start = hdr_m.end()
+                body_rest = stripped[body_start:]
+                sep_idx = body_rest.find("\n\n")
+                if sep_idx >= 0:
+                    thought_parts.append(stripped[:body_start + sep_idx + 2].strip())
+                    stripped = body_rest[sep_idx + 2:].strip()
+                    continue
+                else:
+                    thought_parts.append(stripped)
+                    stripped = ""
+                    break
+            else:
+                break
+        else:
+            break
+
+    res: dict[str, Any] = {"role": "assistant", "content": stripped if stripped else None}
+    if thought_parts:
+        res["reasoning_content"] = "\n\n".join(thought_parts)
+    return res
+

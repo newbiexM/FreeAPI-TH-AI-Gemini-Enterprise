@@ -20,6 +20,33 @@ _SENTINEL = "@@HERMES_TOOL_CALL@@"
 class StreamChunk(NamedTuple):
     text: str
     tool_calls: list[dict[str, Any]]
+    thought: str = ""
+
+
+_THOUGHT_TITLE_KEYWORDS = {
+    "thought", "thinking", "thinking process", "reasoning",
+    "internal monologue", "chain of thought", "observation", "plan"
+}
+
+_MONOLOGUE_INDICATORS = (
+    "i'm", "i am", "my goal", "my current focus", "i will", "i need to",
+    "i should", "findings indicate", "i have", "i want", "i delve",
+    "i investigate", "i review", "i examine", "i process", "i formulate",
+    "i search", "current focus", "we will", "i am currently", "i'm currently"
+)
+
+_THOUGHT_HEADER_RE = re.compile(r"^\s*\*\*(.+?)\*\*\s*\n+", re.DOTALL)
+_XML_THOUGHT_START_RE = re.compile(r"^\s*<(?:thought|think|reasoning)>", re.IGNORECASE)
+
+
+def _is_thought_header(title: str) -> bool:
+    cleaned = title.strip().lower()
+    if cleaned in _THOUGHT_TITLE_KEYWORDS:
+        return True
+    words = cleaned.split()
+    if words and (words[0].endswith("ing") or words[-1].endswith("ing")):
+        return True
+    return False
 
 
 class RefusalDetected(Exception):
@@ -185,6 +212,7 @@ class StreamInterceptor:
         self._in_tool_block: bool = False
         self._tool_start_len: int = 0
         self._tool_body_start: int = 0
+        self._in_thought_phase: bool = True
 
     def feed_with_gate(self, chunk: str, refusal_checker: Callable[[str], bool]) -> StreamChunk:
         if self._gated:
@@ -196,9 +224,13 @@ class StreamInterceptor:
                 unbuffered = self._gate_buffer
                 self._gate_buffer = ""
                 return self.feed(unbuffered)
-            # Check if a tool call start marker is already present in gate buffer
+            # Check if a tool call start marker or thought marker is already present in gate buffer
             s_idx, _ = find_marker(self._gate_buffer, "start", final=False)
-            if s_idx >= 0:
+            if (
+                s_idx >= 0
+                or _XML_THOUGHT_START_RE.match(self._gate_buffer)
+                or _THOUGHT_HEADER_RE.match(self._gate_buffer)
+            ):
                 self._gated = False
                 unbuffered = self._gate_buffer
                 self._gate_buffer = ""
@@ -222,8 +254,73 @@ class StreamInterceptor:
         return chunk
 
     def _drain(self, final: bool) -> StreamChunk:
+        thought_parts: list[str] = []
         content_parts: list[str] = []
         emitted_calls: list[dict[str, Any]] = []
+
+        # Thought / reasoning extraction phase at stream start
+        while self._in_thought_phase:
+            rest = self._buffer[self._offset:]
+            if not rest:
+                break
+
+            # 1. XML thought tags: <thought>...</thought>, <think>...</think>, <reasoning>...</reasoning>
+            xml_m = _XML_THOUGHT_START_RE.match(rest)
+            if xml_m:
+                tag_open = xml_m.group(0)
+                tag_name = tag_open.strip()[1:-1].lower()
+                close_tag = f"</{tag_name}>"
+                tag_end = rest.lower().find(close_tag, len(tag_open))
+                if tag_end >= 0:
+                    inner = rest[len(tag_open):tag_end]
+                    thought_parts.append(inner)
+                    self._offset += tag_end + len(close_tag)
+                    continue
+                elif final:
+                    inner = rest[len(tag_open):]
+                    thought_parts.append(inner)
+                    self._offset = len(self._buffer)
+                    break
+                else:
+                    # Incomplete XML tag body, wait for closing tag
+                    return StreamChunk(text="", tool_calls=[], thought="".join(thought_parts))
+
+            # 2. Markdown research / thought blocks: **Verb-ing Topic**\n\nI'm ...\n\n
+            hdr_m = _THOUGHT_HEADER_RE.match(rest)
+            if hdr_m:
+                title = hdr_m.group(1)
+                if _is_thought_header(title):
+                    body_start = hdr_m.end()
+                    body_rest = rest[body_start:]
+                    sep_idx = body_rest.find("\n\n")
+                    if sep_idx >= 0:
+                        block_len = body_start + sep_idx + 2
+                        thought_block = rest[:block_len]
+                        thought_parts.append(thought_block)
+                        self._offset += block_len
+                        continue
+                    elif final:
+                        thought_parts.append(rest)
+                        self._offset = len(self._buffer)
+                        break
+                    else:
+                        # Block is still streaming in, wait for \n\n
+                        return StreamChunk(text="", tool_calls=[], thought="".join(thought_parts))
+                else:
+                    self._in_thought_phase = False
+                    break
+
+            # 3. Check for incomplete markers at boundary
+            stripped = rest.strip()
+            if not final and (
+                stripped in {"*", "**", "<"}
+                or any(stripped.startswith(f"<{t}"[:k]) for t in ("thought", "think", "reasoning") for k in range(2, len(t) + 2))
+            ):
+                return StreamChunk(text="", tool_calls=[], thought="".join(thought_parts))
+
+            # Not a thought block: thought phase ends
+            self._in_thought_phase = False
+            break
 
         while True:
             # Swallow stray fences or whitespace right after a tool call closed
@@ -329,4 +426,4 @@ class StreamInterceptor:
             self._in_tool_block = False
             self._pending_sep = True
 
-        return StreamChunk(text="".join(content_parts), tool_calls=emitted_calls)
+        return StreamChunk(text="".join(content_parts), tool_calls=emitted_calls, thought="".join(thought_parts))

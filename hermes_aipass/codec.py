@@ -93,16 +93,27 @@ def extract_stream_events(lines: Iterable[bytes]) -> Iterator[dict[str, Any]]:
                 continue
             if code == "0" and isinstance(decoded, str):
                 yield {"type": "text-delta", "delta": decoded}
+            elif code == "b" and isinstance(decoded, str):
+                yield {"type": "reasoning-delta", "delta": decoded}
             elif code == "3":
                 yield {"type": "error", "errorText": str(decoded)}
 
 
 def text_delta(event: dict[str, Any]) -> str:
     kind = event.get("type")
-    if kind in {"text-delta", "reasoning-delta"}:
+    if kind == "text-delta":
         delta = event.get("delta")
         return delta if isinstance(delta, str) else ""
     if kind == "text" and isinstance(event.get("text"), str):
         return event["text"]
     return ""
+
+
+def reasoning_delta(event: dict[str, Any]) -> str:
+    kind = event.get("type")
+    if kind == "reasoning-delta":
+        delta = event.get("delta")
+        return delta if isinstance(delta, str) else ""
+    return ""
+
 

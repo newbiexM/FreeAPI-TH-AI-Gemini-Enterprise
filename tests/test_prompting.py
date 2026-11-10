@@ -134,6 +134,22 @@ class PromptingTests(unittest.TestCase):
         self.assertEqual(len(msg2["tool_calls"]), 1)
         self.assertEqual(msg2["tool_calls"][0]["function"]["name"], "terminal")
 
+    def test_parse_assistant_separates_reasoning_content_from_thai_answer(self):
+        raw = (
+            "**Researching Card Applications**\n\n"
+            "I'm currently focusing on gathering real user feedback.\n\n"
+            "**Analyzing Cash Card Feedback**\n\n"
+            "I'm reviewing user experiences.\n\n"
+            "สรุปผลตอบรับและฟีดแบคจริงจากผู้ใช้งาน"
+        )
+        msg = parse_assistant(raw, {"terminal"})
+        self.assertEqual(msg["role"], "assistant")
+        self.assertIn("reasoning_content", msg)
+        self.assertIn("Researching Card Applications", msg["reasoning_content"])
+        self.assertIn("Analyzing Cash Card Feedback", msg["reasoning_content"])
+        self.assertEqual(msg["content"], "สรุปผลตอบรับและฟีดแบคจริงจากผู้ใช้งาน")
+
+
     def test_recency_bias_output_rules_at_prompt_end(self):
         prompt = bootstrap_prompt(
             [{"role": "user", "content": "What is the date?"}],

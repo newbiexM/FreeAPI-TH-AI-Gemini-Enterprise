@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 
 from .auth import BASE_URL, AuthError, KeychainStore, apply_set_cookie
 from .accounts import Account, AccountPool, AllAccountsUnavailableError
-from .codec import decode_loader_bytes, extract_stream_events, text_delta, walk
+from .codec import decode_loader_bytes, extract_stream_events, reasoning_delta, text_delta, walk
 from .models import GEMINI_ENTERPRISE_MODELS, Model, extract_models
 
 USER_AGENT = (
@@ -228,6 +228,11 @@ class AiPassClient:
                 if delta:
                     saw_content = True
                     yield delta
+                r_delta = reasoning_delta(event)
+                if r_delta:
+                    saw_content = True
+                    yield f"<thought>{r_delta}</thought>"
+
             if not saw_content:
                 raise ProtocolError("AiPASS stream completed without assistant content")
         finally:

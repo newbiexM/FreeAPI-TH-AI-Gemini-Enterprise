@@ -82,3 +82,65 @@ class TestRefusalGate(unittest.TestCase):
 
         c1 = interceptor.feed_with_gate("Here is the beginning of the answer that passes the gate smoothly.", is_refusal)
         self.assertTrue(len(c1.text) > 0)
+
+
+class TestThoughtExtraction(unittest.TestCase):
+    def test_extract_thought_blocks_separates_research_monologue_from_thai_answer(self):
+        from hermes_aipass.streaming import StreamInterceptor
+        raw_chunks = [
+            "**Researching Card Applications**\n\n",
+            "I'm currently focusing on gathering real user feedback regarding the application process for \"A money\" credit cards. My goal is to understand the practical experiences and insights of those who have gone through it.\n\n",
+            "**Researching A money application**\n\n",
+            "I'm currently investigating user experiences with the \"A money\" cash card application, specifically seeking insights from actual users, as found on platforms like Pantip. My goal is to gather practical feedback to inform a comprehensive understanding of the process.\n\n",
+            "**Analyzing Cash Card Feedback**\n\n",
+            "I'm reviewing user experiences with the \"A money\" cash card, focusing on Pantip discussions. Findings indicate swift approval times, often within hours or a few days, but some users report surprisingly low initial credit limits despite advertising.\n\n",
+            "**Assessing Cash Card Realities**\n\n",
+            "I'm delving into user accounts regarding \"A money\" cash card interest rates and withdrawal limits. While advertised low rates exist, actual approvals lean towards standard credit assessment bands. Daily withdrawal caps are also a noted operational constraint.\n\n",
+            "สรุปผลตอบรับและฟีดแบคจริงจากผู้ใช้งาน (เช่น บน Pantip และช่องทางออนไลน์) เกี่ยวกับการสมัคร **บัตรกดเงินสด A money (เอมันนี่)** โดยบริษัท ไอร่า แอนด์ ไอฟุล จำกัด (มหาชน) มีประเด็นสำคัญดังนี้ครับ:\n\n* **ความเร็วในการอนุมัติ:** เสียงส่วนใหญ่ระบุว่าขั้นตอนการสมัครไม่ซับซ้อน ทราบผลค่อนข้างไว"
+        ]
+
+        interceptor = StreamInterceptor()
+        emitted_thoughts: list[str] = []
+        emitted_texts: list[str] = []
+
+        for c in raw_chunks:
+            chunk = interceptor.feed(c)
+            if getattr(chunk, "thought", ""):
+                emitted_thoughts.append(chunk.thought)
+            if chunk.text:
+                emitted_texts.append(chunk.text)
+
+        final_chunk = interceptor.finish()
+        if getattr(final_chunk, "thought", ""):
+            emitted_thoughts.append(final_chunk.thought)
+        if final_chunk.text:
+            emitted_texts.append(final_chunk.text)
+
+        full_thought = "".join(emitted_thoughts)
+        full_text = "".join(emitted_texts)
+
+        # Thought should capture research headers and monologues
+        self.assertIn("Researching Card Applications", full_thought)
+        self.assertIn("Assessing Cash Card Realities", full_thought)
+        self.assertIn("I'm currently focusing on gathering", full_thought)
+
+        # Real text should NOT contain any thought headers or internal monologue
+        self.assertNotIn("Researching Card Applications", full_text)
+        self.assertNotIn("Assessing Cash Card Realities", full_text)
+        self.assertNotIn("I'm currently focusing on gathering", full_text)
+
+        # Real text should start with the Thai response
+        self.assertTrue(full_text.strip().startswith("สรุปผลตอบรับและฟีดแบคจริงจากผู้ใช้งาน"))
+
+    def test_extract_xml_thought_tags(self):
+        from hermes_aipass.streaming import StreamInterceptor
+        interceptor = StreamInterceptor()
+        c1 = interceptor.feed("<thought>Analyzing the user's intent and requirements...</thought>Here is the response.")
+        c2 = interceptor.finish()
+
+        full_thought = (getattr(c1, "thought", "") + getattr(c2, "thought", "")).strip()
+        full_text = (c1.text + c2.text).strip()
+
+        self.assertEqual(full_thought, "Analyzing the user's intent and requirements...")
+        self.assertEqual(full_text, "Here is the response.")
+

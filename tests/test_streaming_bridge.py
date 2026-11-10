@@ -55,6 +55,46 @@ class TestStreamingBridge(unittest.TestCase):
     @patch.object(Handler, "send_response")
     @patch.object(Handler, "send_header")
     @patch.object(Handler, "end_headers")
+    def test_stream_completion_emits_reasoning_content_delta(self, mock_end, mock_header, mock_resp):
+        handler = Handler.__new__(Handler)
+        handler.rfile = io.BytesIO()
+        handler.wfile = io.BytesIO()
+        handler.headers = _make_headers({"X-AiPASS-Session-Id": "test-stream-sess"})
+
+        deltas = [
+            "**Researching Card Applications**\n\nI'm currently investigating.\n\n",
+            "Here is the final answer in Thai."
+        ]
+        mock_execute = MagicMock(return_value=("conv-123", iter(deltas), set(), "test-stream-sess", "prompt"))
+        handler._execute = mock_execute
+        handler._complete_state = MagicMock()
+        handler._session_id = MagicMock(return_value="test-stream-sess")
+
+        body = {"model": "gemini-3.8-flash", "stream": True}
+        messages = [{"role": "user", "content": "hello"}]
+
+        handler._stream_completion(body, messages, "gemini-3.8-flash")
+
+        written = handler.wfile.getvalue().decode("utf-8")
+        self.assertIn("reasoning_content", written)
+        self.assertIn("Researching Card Applications", written)
+
+        # Content delta should NOT contain the thought, and reconstructed content matches
+        collected_content = []
+        for line in written.split("\n"):
+            if line.startswith("data: ") and not line.strip().endswith("[DONE]"):
+                payload = json.loads(line[6:])
+                delta = payload["choices"][0]["delta"]
+                if "content" in delta:
+                    self.assertNotIn("Researching Card Applications", delta["content"])
+                    collected_content.append(delta["content"])
+
+        self.assertEqual("".join(collected_content), "Here is the final answer in Thai.")
+
+
+    @patch.object(Handler, "send_response")
+    @patch.object(Handler, "send_header")
+    @patch.object(Handler, "end_headers")
     def test_stream_completion_tool_call_incremental(self, mock_end, mock_header, mock_resp):
         handler = Handler.__new__(Handler)
         handler.rfile = io.BytesIO()

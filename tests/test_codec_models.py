@@ -76,6 +76,20 @@ class CodecModelTests(unittest.TestCase):
         self.assertEqual("".join(text_delta(event) for event in events), "hello world")
         self.assertEqual(events[-1]["type"], "done")
 
+    def test_separates_reasoning_delta_from_text_delta(self):
+        from hermes_aipass.codec import reasoning_delta
+        lines = [
+            b'b:"Thinking about card application..."\n',
+            b'data: {"type":"reasoning-delta","delta":" Analyzing..."}\n',
+            b'0:"Final answer"\n',
+        ]
+        events = list(extract_stream_events(lines))
+        texts = [text_delta(e) for e in events if text_delta(e)]
+        thoughts = [reasoning_delta(e) for e in events if reasoning_delta(e)]
+        self.assertEqual("".join(thoughts), "Thinking about card application... Analyzing...")
+        self.assertEqual("".join(texts), "Final answer")
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -409,7 +409,9 @@ class Handler(BaseHTTPRequestHandler):
                 interceptor = StreamInterceptor(allowed_tools=allowed, gate_chars=120)
 
                 block_index = 0
+                thinking_block_open = False
                 text_block_open = False
+                collected_thought: list[str] = []
                 collected_text: list[str] = []
                 collected_tool_calls: list[dict[str, Any]] = []
 
@@ -454,8 +456,28 @@ class Handler(BaseHTTPRequestHandler):
                         interceptor = StreamInterceptor(allowed_tools=allowed, gate_chars=120)
                         continue
 
+                    if getattr(chunk, "thought", ""):
+                        _ensure_headers()
+                        if not thinking_block_open:
+                            self._anthropic_sse("content_block_start", {
+                                "type": "content_block_start",
+                                "index": block_index,
+                                "content_block": {"type": "thinking", "thinking": ""},
+                            })
+                            thinking_block_open = True
+                        self._anthropic_sse("content_block_delta", {
+                            "type": "content_block_delta",
+                            "index": block_index,
+                            "delta": {"type": "thinking_delta", "thinking": chunk.thought},
+                        })
+                        collected_thought.append(chunk.thought)
+
                     if chunk.text:
                         _ensure_headers()
+                        if thinking_block_open:
+                            self._anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
+                            block_index += 1
+                            thinking_block_open = False
                         if not text_block_open:
                             self._anthropic_sse("content_block_start", {
                                 "type": "content_block_start",
@@ -472,6 +494,10 @@ class Handler(BaseHTTPRequestHandler):
 
                     if chunk.tool_calls:
                         _ensure_headers()
+                        if thinking_block_open:
+                            self._anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
+                            block_index += 1
+                            thinking_block_open = False
                         if text_block_open:
                             self._anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
                             block_index += 1
@@ -496,8 +522,28 @@ class Handler(BaseHTTPRequestHandler):
                             collected_tool_calls.append(tc)
 
                 tail = interceptor.finish()
+                if getattr(tail, "thought", ""):
+                    _ensure_headers()
+                    if not thinking_block_open:
+                        self._anthropic_sse("content_block_start", {
+                            "type": "content_block_start",
+                            "index": block_index,
+                            "content_block": {"type": "thinking", "thinking": ""},
+                        })
+                        thinking_block_open = True
+                    self._anthropic_sse("content_block_delta", {
+                        "type": "content_block_delta",
+                        "index": block_index,
+                        "delta": {"type": "thinking_delta", "thinking": tail.thought},
+                    })
+                    collected_thought.append(tail.thought)
+
                 if tail.text:
                     _ensure_headers()
+                    if thinking_block_open:
+                        self._anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
+                        block_index += 1
+                        thinking_block_open = False
                     if not text_block_open:
                         self._anthropic_sse("content_block_start", {
                             "type": "content_block_start",
@@ -514,6 +560,10 @@ class Handler(BaseHTTPRequestHandler):
 
                 if tail.tool_calls:
                     _ensure_headers()
+                    if thinking_block_open:
+                        self._anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
+                        block_index += 1
+                        thinking_block_open = False
                     if text_block_open:
                         self._anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
                         block_index += 1
@@ -537,6 +587,10 @@ class Handler(BaseHTTPRequestHandler):
                         block_index += 1
                         collected_tool_calls.append(tc)
 
+                if thinking_block_open:
+                    self._anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
+                    block_index += 1
+                    thinking_block_open = False
                 if text_block_open:
                     self._anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
 
@@ -589,6 +643,7 @@ class Handler(BaseHTTPRequestHandler):
                 conversation_id, deltas, allowed, _, _ = self._execute(body, messages, model_id)
                 interceptor = StreamInterceptor(allowed_tools=allowed, gate_chars=120)
 
+                collected_thought: list[str] = []
                 collected_text: list[str] = []
                 collected_tool_calls: list[dict[str, Any]] = []
 
@@ -634,6 +689,9 @@ class Handler(BaseHTTPRequestHandler):
                         interceptor = StreamInterceptor(allowed_tools=allowed, gate_chars=120)
                         continue
 
+                    if getattr(chunk, "thought", ""):
+                        _emit_chunk({"role": "assistant", "reasoning_content": chunk.thought})
+                        collected_thought.append(chunk.thought)
                     if chunk.text:
                         _emit_chunk({"role": "assistant", "content": chunk.text})
                         collected_text.append(chunk.text)
@@ -643,6 +701,9 @@ class Handler(BaseHTTPRequestHandler):
 
                 # Finish draining interceptor
                 tail = interceptor.finish()
+                if getattr(tail, "thought", ""):
+                    _emit_chunk({"role": "assistant", "reasoning_content": tail.thought})
+                    collected_thought.append(tail.thought)
                 if tail.text:
                     _emit_chunk({"role": "assistant", "content": tail.text})
                     collected_text.append(tail.text)
@@ -670,6 +731,8 @@ class Handler(BaseHTTPRequestHandler):
                     "role": "assistant",
                     "content": final_content,
                 }
+                if collected_thought:
+                    final_message["reasoning_content"] = "".join(collected_thought).strip()
                 if collected_tool_calls:
                     final_message["tool_calls"] = collected_tool_calls
 
