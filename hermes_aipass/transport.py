@@ -31,21 +31,21 @@ class Transport(Protocol):
 
 
 def get_transport(name: str | None = None) -> Transport:
-    """Factory resolving the active upstream transport."""
+    """Factory resolving the active upstream transport.
+    
+    Defaults to Gemini Enterprise DiscoveryEngineTransport.
+    Use name='web' or AIPASS_TRANSPORT='web' to force legacy web client.
+    """
     selected = (name or os.environ.get("AIPASS_TRANSPORT", "")).strip().lower()
-
-    if selected in {"discovery_engine", "discoveryengine", "enterprise", "vertex", "ge"}:
-        from .discovery_engine import DiscoveryEngineTransport
-        return DiscoveryEngineTransport()
 
     if selected in {"web", "aipass", "chat"}:
         from .client import AiPassClient
         return AiPassClient()
 
-    if os.environ.get("AIPASS_USE_ENTERPRISE", "").lower() in {"1", "true", "yes"}:
+    try:
         from .discovery_engine import DiscoveryEngineTransport
         return DiscoveryEngineTransport()
-
-    from .client import AiPassClient
-    return AiPassClient()
-
+    except Exception:
+        # Fall back to web client if Discovery Engine configuration / auth is unavailable
+        from .client import AiPassClient
+        return AiPassClient()

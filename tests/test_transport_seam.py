@@ -53,29 +53,55 @@ class TestTransportSeam(unittest.TestCase):
     def test_discovery_engine_create_conversation_and_stream(self):
         from hermes_aipass.discovery_engine import DiscoveryEngineTransport
 
-        transport = DiscoveryEngineTransport(tenant_id="test-cid-1234")
+        transport = DiscoveryEngineTransport(tenant_id="test-cid-1234", csesidx="123456789")
         self.assertEqual(transport.tenant_id, "test-cid-1234")
+        self.assertEqual(transport.csesidx, "123456789")
 
-        cid = transport.create_conversation("Hello Google Discovery Engine", "gemini-3.8-flash")
-        self.assertTrue(cid.startswith("ge-"))
+        # Mock _get_jwt response for getoxsrf and widgetCreateSession
+        mock_oxsrf_resp = MagicMock()
+        mock_oxsrf_resp.read.return_value = b")]}'\n{\"xsrfToken\": \"mock_xsrf_token_32_bytes_long_1234567890=\", \"keyId\": \"mock_key_id\"}"
 
-        # Mock Discovery Engine SSE response format
-        mock_sse_lines = [
-            b'data: {"answer": {"reply": "Hello from Google "}}\n\n',
-            b'data: {"answer": {"thought": "Processing request in Vertex..."}}\n\n',
-            b'data: {"answer": {"reply": "Gemini Enterprise!"}}\n\n',
-            b'data: [DONE]\n\n',
-        ]
-        mock_resp = MagicMock()
-        mock_resp.__iter__.return_value = iter(mock_sse_lines)
-        mock_resp.headers = MagicMock()
-        mock_resp.headers.get_all.return_value = []
+        mock_session_resp = MagicMock()
+        mock_session_resp.read.return_value = json.dumps({
+            "session": {"name": "collections/default_collection/engines/thai-citizen-app-68/sessions/mock-session-123"}
+        }).encode("utf-8")
 
-        with patch.object(transport, "_open", return_value=mock_resp):
-            deltas = list(transport.send_stream(cid, "How are you?", "gemini-3.8-flash"))
-            self.assertEqual(deltas, [
-                "Hello from Google ",
-                "<thought>Processing request in Vertex...</thought>",
-                "Gemini Enterprise!",
-            ])
+        # Mock Discovery Engine widgetStreamAssist chunk response
+        mock_stream_data = json.dumps([
+            {
+                "streamAssistResponse": {
+                    "answer": {
+                        "replies": [
+                            {"groundedContent": {"content": {"role": "model", "text": "Hello from Google "}}}
+                        ]
+                    }
+                }
+            },
+            {
+                "streamAssistResponse": {
+                    "answer": {
+                        "replies": [
+                            {"groundedContent": {"content": {"role": "model", "text": "Gemini Enterprise!"}}}
+                        ]
+                    }
+                }
+            }
+        ]).encode("utf-8")
+
+        mock_assist_resp = MagicMock()
+        chunks = [mock_stream_data[:100], mock_stream_data[100:], b""]
+        mock_assist_resp.read.side_effect = chunks
+
+        with patch.object(transport, "_get_jwt", return_value="mock.jwt.token"):
+            with patch.object(transport, "_open") as mock_open:
+                mock_open.return_value = mock_session_resp
+                cid = transport.create_conversation("Hello Google Discovery Engine", "gemini-3.8-flash")
+                self.assertEqual(cid, "collections/default_collection/engines/thai-citizen-app-68/sessions/mock-session-123")
+
+                mock_open.return_value = mock_assist_resp
+                deltas = list(transport.send_stream(cid, "How are you?", "gemini-3.8-flash"))
+                self.assertEqual(deltas, [
+                    "Hello from Google ",
+                    "Gemini Enterprise!",
+                ])
 

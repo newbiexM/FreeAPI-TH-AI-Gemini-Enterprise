@@ -6,15 +6,23 @@ import base64
 import hashlib
 import json
 import os
+import re
 import socket
 import struct
 import subprocess
 import time
 from pathlib import Path
 from urllib.error import URLError
+from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
-from .auth import AuthError, KeychainStore, state_from_cdp_cookies, validate_auth
+from .auth import (
+    AuthError,
+    AuthState,
+    KeychainStore,
+    state_from_cdp_cookies,
+    validate_auth,
+)
 from .paths import chrome_profile_dir
 
 
@@ -158,6 +166,49 @@ def _close_target(port: int, target_id: str) -> None:
         pass
 
 
+def refresh_session_from_browser(port: int = 9222) -> AuthState | None:
+    """Attempt silent non-interactive credential extraction from an already running browser."""
+    try:
+        pages = _targets(port)
+    except Exception:
+        return None
+
+    ge_page = next(
+        (
+            item
+            for item in pages
+            if item.get("type") == "page"
+            and "vertexaisearch.cloud.google" in item.get("url", "")
+        ),
+        None,
+    )
+    if not ge_page:
+        return None
+
+    page_url = ge_page.get("url", "")
+    parsed = urlparse(page_url)
+    csesidx = parse_qs(parsed.query).get("csesidx", [None])[0]
+    cid_match = re.search(r"/cid/([^/?]+)", parsed.path)
+    tenant_id = cid_match.group(1) if cid_match else None
+
+    try:
+        client = WebSocket(ge_page["webSocketDebuggerUrl"])
+        cookies = client.call(
+            "Network.getCookies",
+            {"urls": ["https://vertexaisearch.cloud.google", "https://de.aipass.net"]},
+        ).get("cookies", [])
+        client.close()
+    except Exception:
+        return None
+
+    if not cookies:
+        return None
+
+    state = state_from_cdp_cookies(cookies, csesidx=csesidx, tenant_id=tenant_id)
+    KeychainStore().save(state)
+    return state
+
+
 def interactive_login(port: int = 9222, timeout: int = 300) -> dict:
     """Connect to Brave/Chrome DevTools, capture session, and save credentials."""
     running_process = None
@@ -189,39 +240,84 @@ def interactive_login(port: int = 9222, timeout: int = 300) -> dict:
         )
 
     deadline = time.monotonic() + timeout
+    ge_navigated = False
     try:
         while time.monotonic() < deadline:
             if running_process is not None and running_process.poll() is not None:
                 raise AuthError("Browser closed before AiPASS login completed")
             try:
                 pages = _targets(port)
-                page = next(
+                # First priority: Gemini Enterprise Google page
+                ge_page = next(
                     (
                         item
                         for item in pages
                         if item.get("type") == "page"
-                        and ("vertexaisearch.cloud.google" in item.get("url", "") or "de.aipass.net" in item.get("url", ""))
+                        and "vertexaisearch.cloud.google" in item.get("url", "")
                     ),
                     None,
                 )
-                if page:
-                    page_url = page.get("url", "")
-                    is_ge = "vertexaisearch.cloud.google" in page_url
-                    is_aipass_chat = "/chat" in page_url and "/sign-in" not in page_url
-                    if is_ge or is_aipass_chat:
-                        client = WebSocket(page["webSocketDebuggerUrl"])
-                        is_valid = is_ge
-                        if not is_valid:
-                            session = client.call(
-                                "Runtime.evaluate",
-                                {
-                                    "expression": "fetch('/api/v1/auth/get-session').then(r => r.ok)",
-                                    "awaitPromise": True,
-                                    "returnByValue": True,
-                                },
+                if ge_page:
+                    page_url = ge_page.get("url", "")
+                    parsed = urlparse(page_url)
+                    csesidx = parse_qs(parsed.query).get("csesidx", [None])[0]
+                    cid_match = re.search(r"/cid/([^/?]+)", parsed.path)
+                    tenant_id = cid_match.group(1) if cid_match else None
+
+                    client = WebSocket(ge_page["webSocketDebuggerUrl"])
+                    cookies = client.call("Network.getAllCookies").get("cookies", [])
+                    if not cookies:
+                        cookies = client.call(
+                            "Network.getCookies",
+                            {"urls": ["https://de.aipass.net", "https://vertexaisearch.cloud.google"]},
+                        ).get("cookies", [])
+                    state = state_from_cdp_cookies(cookies, csesidx=csesidx, tenant_id=tenant_id)
+                    KeychainStore().save(state)
+                    validate_auth(state)
+                    if not already_running:
+                        client.call("Browser.close")
+                    client.close()
+                    return {
+                        "valid": True,
+                        "expires_at": state.expires_at,
+                        "tenant": "discovery_engine",
+                        "csesidx": csesidx,
+                    }
+
+                # Second priority: AiPass portal page
+                aipass_page = next(
+                    (
+                        item
+                        for item in pages
+                        if item.get("type") == "page"
+                        and "de.aipass.net" in item.get("url", "")
+                    ),
+                    None,
+                )
+                if aipass_page:
+                    client = WebSocket(aipass_page["webSocketDebuggerUrl"])
+                    session = client.call(
+                        "Runtime.evaluate",
+                        {
+                            "expression": "fetch('/api/v1/auth/get-session').then(r => r.ok)",
+                            "awaitPromise": True,
+                            "returnByValue": True,
+                        },
+                    )
+                    is_valid = session.get("result", {}).get("value") is True
+                    if is_valid:
+                        # User is logged in to TH-Ai-Pass: automatically navigate to Gemini Enterprise SSO
+                        if not ge_navigated:
+                            client.call(
+                                "Page.navigate",
+                                {"url": "https://de.aipass.net/ge/open"},
                             )
-                            is_valid = session.get("result", {}).get("value") is True
-                        if is_valid:
+                            ge_navigated = True
+                            client.close()
+                            time.sleep(1.5)
+                            continue
+                        else:
+                            # If already attempted navigation, capture whatever cookies we have
                             cookies = client.call("Network.getAllCookies").get("cookies", [])
                             if not cookies:
                                 cookies = client.call(
@@ -235,7 +331,7 @@ def interactive_login(port: int = 9222, timeout: int = 300) -> dict:
                                 client.call("Browser.close")
                             client.close()
                             return {"valid": True, "expires_at": state.expires_at}
-                        client.close()
+                    client.close()
             except (OSError, ValueError, AuthError):
                 pass
             time.sleep(1)

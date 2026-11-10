@@ -209,7 +209,7 @@ hermes freeapi logout
 
 ## 🧪 Testing & Verification
 
-The test suite runs 59 targeted unit tests with strict 100% pass guarantee and strict Pyright static type checking:
+The test suite runs 65 targeted unit tests with strict 100% pass guarantee and strict Pyright static type checking:
 
 ```bash
 # Run full unit test suite

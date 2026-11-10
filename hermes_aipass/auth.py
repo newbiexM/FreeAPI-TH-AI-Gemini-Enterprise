@@ -47,6 +47,8 @@ class AuthError(RuntimeError):
 class AuthState:
     cookies: dict[str, str]
     expires_at: str | None = None
+    csesidx: str | None = None
+    tenant_id: str | None = None
 
     @property
     def cookie_header(self) -> str:
@@ -54,7 +56,12 @@ class AuthState:
 
     def as_json(self) -> str:
         return json.dumps(
-            {"cookies": self.cookies, "expires_at": self.expires_at},
+            {
+                "cookies": self.cookies,
+                "expires_at": self.expires_at,
+                "csesidx": self.csesidx,
+                "tenant_id": self.tenant_id,
+            },
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -104,6 +111,8 @@ class KeychainStore:
                         return AuthState(
                             cookies={str(k): str(v) for k, v in cookies.items()},
                             expires_at=raw.get("expires_at"),
+                            csesidx=raw.get("csesidx"),
+                            tenant_id=raw.get("tenant_id"),
                         )
             except Exception:
                 pass
@@ -116,6 +125,8 @@ class KeychainStore:
                     return AuthState(
                         cookies={str(k): str(v) for k, v in cookies.items()},
                         expires_at=raw.get("expires_at"),
+                        csesidx=raw.get("csesidx"),
+                        tenant_id=raw.get("tenant_id"),
                     )
             except Exception:
                 pass
@@ -137,7 +148,12 @@ class KeychainStore:
         metadata_path().unlink(missing_ok=True)
 
 
-def state_from_cdp_cookies(cookies: Iterable[dict]) -> AuthState:
+def state_from_cdp_cookies(
+    cookies: Iterable[dict],
+    *,
+    csesidx: str | None = None,
+    tenant_id: str | None = None,
+) -> AuthState:
     selected: dict[str, str] = {}
     auth_expiry: float | None = None
     has_aipass_auth = False
@@ -178,7 +194,7 @@ def state_from_cdp_cookies(cookies: Iterable[dict]) -> AuthState:
         datetime.fromtimestamp(auth_expiry, tz=timezone.utc).isoformat()
         if auth_expiry else None
     )
-    return AuthState(selected, expires_at)
+    return AuthState(selected, expires_at, csesidx=csesidx, tenant_id=tenant_id)
 
 
 def apply_set_cookie(state: AuthState, headers: Iterable[str]) -> bool:
