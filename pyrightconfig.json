@@ -1,0 +1,10 @@
+{
+  "include": [
+    ".",
+    "hermes_aipass",
+    "tests"
+  ],
+  "extraPaths": [
+    "."
+  ]
+}

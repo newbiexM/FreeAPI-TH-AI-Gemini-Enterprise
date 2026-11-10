@@ -19,3 +19,7 @@ include = ["hermes_aipass*"]
 testpaths = ["tests"]
 addopts = "-q"
 
+[tool.pyright]
+extraPaths = ["."]
+
+
