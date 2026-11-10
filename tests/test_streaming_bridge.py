@@ -4,7 +4,6 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from hermes_aipass.bridge import Handler, RUNTIME
-from hermes_aipass.streaming import StreamInterceptor
 
 
 class DummyRequest:
