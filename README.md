@@ -63,6 +63,18 @@ The bridge features a zero-latency `StreamInterceptor` (adapted from `qwen-free-
 - **Initial Refusal Gating**: Intercepts upfront model refusal messages before emitting HTTP headers, enabling seamless and transparent automatic retries.
 - **Tolerant Multi-Syntax Parsing**: Robust parsing for `<tool_call>`, `<<<TOOL_CALL>>>`, and `@@HERMES_TOOL_CALL@@` with code fence stripping and bracket tolerance.
 
+## Dual-Protocol Support (OpenAI & Anthropic)
+
+The bridge provides parity across two major agent protocols on `127.0.0.1:8792`:
+- **OpenAI Endpoint**: `POST /v1/chat/completions` (Hermes CLI, TUI, Desktop, WebUI, Cursor).
+- **Anthropic Endpoints**: `POST /v1/messages` and `POST /v1/messages/count_tokens` (Claude Code, Cline, Roo-Code).
+
+## Multi-Account Resilient Pool
+
+Pass multiple tokens via `AIPASS_TOKENS="tok1,tok2,tok3"`:
+- **Round-Robin Rotation**: Dispatches queries across healthy accounts.
+- **Exponential Cooldown on 429**: Backs off on rate limit (`60s * 2^(streak - 1)` up to 30m) with automatic pre-stream failover to the next healthy account.
+
 ## License
 
 MIT
