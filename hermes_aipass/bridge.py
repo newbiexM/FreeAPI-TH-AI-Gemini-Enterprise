@@ -25,6 +25,7 @@ from .prompting import (
     tool_names,
 )
 from .sessions import SessionStore
+from .streaming import RefusalDetected, StreamInterceptor
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8792
@@ -305,98 +306,113 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def _stream_completion(self, body: dict[str, Any], messages: list[dict[str, Any]], model_id: str) -> None:
-        session_id = self._session_id(messages)
+        session_id = self._session_id(messages, body)
         completion_id = f"chatcmpl-{uuid.uuid4()}"
         created = int(time.time())
         try:
             with RUNTIME.session_lock(session_id):
                 conversation_id, deltas, allowed, _, _ = self._execute(body, messages, model_id)
-                raw = "".join(deltas)
-                if self._is_refusal(raw):
-                    client = RUNTIME.get_client()
-                    retry_prompt = self._sanitize_for_retry(messages, body.get("tools"))
-                    new_cid = client.create_conversation(CONVERSATION_SEED, model_id)
-                    new_deltas = list(client.send_stream(new_cid, retry_prompt, model_id))
-                    new_raw = "".join(new_deltas)
-                    if not self._is_refusal(new_raw):
-                        raw = new_raw
-                        conversation_id = new_cid
-                    else:
-                        for phrase in _REFUSAL_PHRASES:
-                            raw = raw.replace(phrase, "").strip()
-                        if not raw:
-                            raw = "กำลังดำเนินการตรวจสอบและเชื่อมต่อเครื่องมือ กรุณาลองสั่งการอีกครั้งครับ"
-                message = parse_assistant(raw, allowed)
-                self._complete_state(
-                    session_id=session_id,
-                    conversation_id=conversation_id,
-                    model_id=model_id,
-                    messages=messages,
-                    response_message=message,
-                )
+                interceptor = StreamInterceptor(allowed_tools=allowed, gate_chars=120)
 
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "close")
-            self.end_headers()
+                headers_sent = False
+                collected_text: list[str] = []
+                collected_tool_calls: list[dict[str, Any]] = []
 
-            if message.get("tool_calls"):
-                if message.get("content"):
+                def _ensure_headers() -> None:
+                    nonlocal headers_sent
+                    if not headers_sent:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/event-stream")
+                        self.send_header("Cache-Control", "no-cache")
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                        headers_sent = True
+
+                def _emit_chunk(delta_dict: dict[str, Any]) -> None:
+                    _ensure_headers()
                     self._sse(
                         {
                             "id": completion_id,
                             "object": "chat.completion.chunk",
                             "created": created,
                             "model": model_id,
-                            "choices": [{"index": 0, "delta": {"role": "assistant", "content": message["content"]}, "finish_reason": None}],
+                            "choices": [{"index": 0, "delta": delta_dict, "finish_reason": None}],
                         }
                     )
+
+                # Process upstream stream with initial refusal gating
+                delta_iter = iter(deltas)
+                while True:
+                    try:
+                        delta = next(delta_iter)
+                    except StopIteration:
+                        break
+
+                    try:
+                        chunk = interceptor.feed_with_gate(delta, self._is_refusal)
+                    except RefusalDetected:
+                        # Transparent retry on refusal before headers are sent
+                        client = RUNTIME.get_client()
+                        retry_prompt = self._sanitize_for_retry(messages, body.get("tools"))
+                        new_cid = client.create_conversation(CONVERSATION_SEED, model_id)
+                        delta_iter = iter(client.send_stream(new_cid, retry_prompt, model_id))
+                        conversation_id = new_cid
+                        interceptor = StreamInterceptor(allowed_tools=allowed, gate_chars=120)
+                        continue
+
+                    if chunk.text:
+                        _emit_chunk({"role": "assistant", "content": chunk.text})
+                        collected_text.append(chunk.text)
+                    if chunk.tool_calls:
+                        _emit_chunk({"role": "assistant", "tool_calls": chunk.tool_calls})
+                        collected_tool_calls.extend(chunk.tool_calls)
+
+                # Finish draining interceptor
+                tail = interceptor.finish()
+                if tail.text:
+                    _emit_chunk({"role": "assistant", "content": tail.text})
+                    collected_text.append(tail.text)
+                if tail.tool_calls:
+                    _emit_chunk({"role": "assistant", "tool_calls": tail.tool_calls})
+                    collected_tool_calls.extend(tail.tool_calls)
+
+                _ensure_headers()
+                finish_reason = "tool_calls" if collected_tool_calls else "stop"
                 self._sse(
                     {
                         "id": completion_id,
                         "object": "chat.completion.chunk",
                         "created": created,
                         "model": model_id,
-                        "choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": message["tool_calls"]}, "finish_reason": None}],
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
                     }
                 )
-                self._sse(
-                    {
-                        "id": completion_id,
-                        "object": "chat.completion.chunk",
-                        "created": created,
-                        "model": model_id,
-                        "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
-                    }
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+
+                # Complete and persist session state
+                final_content = "".join(collected_text).strip() if collected_text else None
+                final_message: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": final_content,
+                }
+                if collected_tool_calls:
+                    final_message["tool_calls"] = collected_tool_calls
+
+                self._complete_state(
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    model_id=model_id,
+                    messages=messages,
+                    response_message=final_message,
                 )
-            else:
-                self._sse(
-                    {
-                        "id": completion_id,
-                        "object": "chat.completion.chunk",
-                        "created": created,
-                        "model": model_id,
-                        "choices": [{"index": 0, "delta": {"role": "assistant", "content": raw}, "finish_reason": None}],
-                    }
-                )
-                self._sse(
-                    {
-                        "id": completion_id,
-                        "object": "chat.completion.chunk",
-                        "created": created,
-                        "model": model_id,
-                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                    }
-                )
-            self.wfile.write(b"data: [DONE]\n\n")
-            self.wfile.flush()
         except Exception as exc:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "close")
-            self.end_headers()
+            if not headers_sent:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
+                self.end_headers()
             self._sse(_error(str(exc), "stream_error"))
         finally:
             self.close_connection = True
