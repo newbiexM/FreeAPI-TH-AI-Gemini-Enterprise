@@ -111,6 +111,7 @@ class DiscoveryEngineTransport:
                 return token
 
         data: dict[str, Any] = {}
+        response: Any = None
         for attempt in (1, 2):
             if not self.csesidx and attempt == 1:
                 try:
@@ -210,37 +211,55 @@ class DiscoveryEngineTransport:
 
     def create_conversation(self, prompt: str, model_id: str) -> str:
         """Create a direct Discovery Engine conversation session."""
-        jwt = self._get_jwt()
-        req_body = {
-            "configId": self.tenant_id,
-            "additionalParams": {"token": "-", "origin": "ORIGIN_UNSPECIFIED"},
-            "createSessionRequest": {"session": {"name": "-", "displayName": ""}},
-        }
-        encoded = json.dumps(req_body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        req = Request(
-            f"{DISCOVERY_ENGINE_BASE}/widgetCreateSession",
-            data=encoded,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {jwt}",
-                "X-Goog-Api-Client": API_CLIENT_HEADER,
-                "X-Server-Token": SERVER_TOKEN,
-                "Origin": AUTH_PORTAL_BASE,
-                "Referer": f"{AUTH_PORTAL_BASE}/",
-                "User-Agent": USER_AGENT,
-            },
-            method="POST",
-        )
-        resp = self._open(req)
-        try:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
-            session_name = data.get("session", {}).get("name")
-            if not session_name:
-                raise ProtocolError("widgetCreateSession did not return a session name")
-            return str(session_name)
-        finally:
-            if hasattr(resp, "close"):
-                resp.close()
+        response: Any = None
+        for attempt in (1, 2):
+            jwt = self._get_jwt()
+            req_body = {
+                "configId": self.tenant_id,
+                "additionalParams": {"token": "-", "origin": "ORIGIN_UNSPECIFIED"},
+                "createSessionRequest": {"session": {"name": "-", "displayName": ""}},
+            }
+            encoded = json.dumps(req_body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            req = Request(
+                f"{DISCOVERY_ENGINE_BASE}/widgetCreateSession",
+                data=encoded,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {jwt}",
+                    "X-Goog-Api-Client": API_CLIENT_HEADER,
+                    "X-Server-Token": SERVER_TOKEN,
+                    "Origin": AUTH_PORTAL_BASE,
+                    "Referer": f"{AUTH_PORTAL_BASE}/",
+                    "User-Agent": USER_AGENT,
+                },
+                method="POST",
+            )
+            try:
+                resp = self._open(req)
+                try:
+                    data = json.loads(resp.read().decode("utf-8", errors="replace"))
+                    session_name = data.get("session", {}).get("name")
+                    if not session_name:
+                        raise ProtocolError("widgetCreateSession did not return a session name")
+                    return str(session_name)
+                finally:
+                    if hasattr(resp, "close"):
+                        resp.close()
+            except ProtocolError as exc:
+                if attempt == 1 and ("401" in str(exc) or "403" in str(exc)):
+                    self._cached_jwt = None
+                    try:
+                        from .cdp import refresh_session_from_browser
+                        refreshed = refresh_session_from_browser()
+                        if refreshed:
+                            self.auth = refreshed
+                            self.csesidx = refreshed.csesidx
+                            self.tenant_id = refreshed.tenant_id or self.tenant_id
+                            continue
+                    except Exception:
+                        pass
+                raise
+        raise ProtocolError("Failed to create Discovery Engine session")
 
     def send_stream(
         self,
@@ -251,52 +270,71 @@ class DiscoveryEngineTransport:
         thinking_level: str | None = None,
     ) -> Iterator[str]:
         """Stream responses directly from Google Discovery Engine widgetStreamAssist endpoint."""
-        if not conversation_id or not conversation_id.startswith("collections/"):
-            conversation_id = self.create_conversation(prompt, model_id)
+        response: Any = None
+        for attempt in (1, 2):
+            if not conversation_id or not conversation_id.startswith("collections/"):
+                conversation_id = self.create_conversation(prompt, model_id)
 
-        jwt = self._get_jwt()
-        req_body = {
-            "configId": self.tenant_id,
-            "additionalParams": {"token": "-", "origin": "ORIGIN_UNSPECIFIED"},
-            "streamAssistRequest": {
-                "session": conversation_id,
-                "query": {"parts": [{"text": prompt}]},
-                "filter": "",
-                "fileIds": [],
-                "answerGenerationMode": "NORMAL",
-                "agentsSpec": {},
-                "toolsSpec": {
-                    "vertexAiSearchSpec": {
-                        "dataStoreSpecs": [
-                            {"dataStore": "collections/default_collection/dataStores/canva_mcp_data"},
-                            {"dataStore": "collections/default_collection/dataStores/citizen-announcement_1793980447630"},
-                            {"dataStore": "collections/default_collection/dataStores/google-sheets_mcp_data"},
-                        ]
+            jwt = self._get_jwt()
+            req_body = {
+                "configId": self.tenant_id,
+                "additionalParams": {"token": "-", "origin": "ORIGIN_UNSPECIFIED"},
+                "streamAssistRequest": {
+                    "session": conversation_id,
+                    "query": {"parts": [{"text": prompt}]},
+                    "filter": "",
+                    "fileIds": [],
+                    "answerGenerationMode": "NORMAL",
+                    "agentsSpec": {},
+                    "toolsSpec": {
+                        "vertexAiSearchSpec": {
+                            "dataStoreSpecs": [
+                                {"dataStore": "collections/default_collection/dataStores/canva_mcp_data"},
+                                {"dataStore": "collections/default_collection/dataStores/citizen-announcement_1793980447630"},
+                                {"dataStore": "collections/default_collection/dataStores/google-sheets_mcp_data"},
+                            ]
+                        },
+                        "toolRegistry": "default_tool_registry",
                     },
-                    "toolRegistry": "default_tool_registry",
+                    "languageCode": "en-US",
+                    "userMetadata": {"timeZone": "Asia/Bangkok"},
+                    "assistSkippingMode": "REQUEST_ASSIST",
                 },
-                "languageCode": "en-US",
-                "userMetadata": {"timeZone": "Asia/Bangkok"},
-                "assistSkippingMode": "REQUEST_ASSIST",
-            },
-        }
+            }
 
-        encoded = json.dumps(req_body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        req = Request(
-            f"{DISCOVERY_ENGINE_BASE}/widgetStreamAssist",
-            data=encoded,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {jwt}",
-                "X-Goog-Api-Client": API_CLIENT_HEADER,
-                "X-Server-Token": SERVER_TOKEN,
-                "Origin": AUTH_PORTAL_BASE,
-                "Referer": f"{AUTH_PORTAL_BASE}/",
-                "User-Agent": USER_AGENT,
-            },
-            method="POST",
-        )
-        response = self._open(req)
+            encoded = json.dumps(req_body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            req = Request(
+                f"{DISCOVERY_ENGINE_BASE}/widgetStreamAssist",
+                data=encoded,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {jwt}",
+                    "X-Goog-Api-Client": API_CLIENT_HEADER,
+                    "X-Server-Token": SERVER_TOKEN,
+                    "Origin": AUTH_PORTAL_BASE,
+                    "Referer": f"{AUTH_PORTAL_BASE}/",
+                    "User-Agent": USER_AGENT,
+                },
+                method="POST",
+            )
+            try:
+                response = self._open(req)
+                break
+            except ProtocolError as exc:
+                if attempt == 1 and ("401" in str(exc) or "403" in str(exc)):
+                    self._cached_jwt = None
+                    try:
+                        from .cdp import refresh_session_from_browser
+                        refreshed = refresh_session_from_browser()
+                        if refreshed:
+                            self.auth = refreshed
+                            self.csesidx = refreshed.csesidx
+                            self.tenant_id = refreshed.tenant_id or self.tenant_id
+                    except Exception:
+                        pass
+                    conversation_id = ""
+                    continue
+                raise
         try:
             def chunk_generator() -> Iterator[bytes]:
                 while True:
