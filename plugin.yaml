@@ -1,12 +1,12 @@
-name: hermes-aipass
+name: freeapi-th-ai-gemini-enterprise
 version: 0.1.0
 manifest_version: 1
 api_version: 1
-description: "Hermes Agent provider bridge exclusively for Gemini Enterprise models via authenticated transport."
+description: "Free OpenAI and Anthropic compatible API bridge for Gemini Enterprise via TH-AI Passport."
 author: Timothy Pratumrut / Yeet2042
 license: MIT
-homepage: https://github.com/newbiexM/Hermes_TH-AI-pass_Gemini-Enterprise
-tags: [provider, gemini-enterprise, google, ai, cli]
+homepage: https://github.com/newbiexM/FreeAPI-TH-AI-Gemini-Enterprise
+tags: [free-api, provider, gemini-enterprise, google, ai, cli]
 config_schema:
   bridge_host:
     type: str

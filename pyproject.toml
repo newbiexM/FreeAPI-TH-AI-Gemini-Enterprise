@@ -3,13 +3,13 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hermes-aipass"
+name = "freeapi-th-ai-gemini-enterprise"
 version = "0.1.0"
-description = "AiPASS model-provider plugin for Hermes Agent"
+description = "Free OpenAI and Anthropic compatible API bridge for Gemini Enterprise via TH-AI Passport"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Yeet2042" }]
+authors = [{ name = "Timothy Pratumrut / Yeet2042" }]
 dependencies = []
 
 [tool.setuptools.packages.find]

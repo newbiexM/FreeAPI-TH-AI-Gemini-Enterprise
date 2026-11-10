@@ -1,9 +1,9 @@
-# Hermes Gemini Enterprise Provider Bridge
+# FreeAPI-TH-AI-Gemini-Enterprise
 
-An unofficial standalone [Hermes Agent](https://github.com/NousResearch/hermes-agent)
-provider exclusively dedicated to **Gemini Enterprise** models (`gemini-4-argon`, `gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, and `gemini-3.1-pro-preview`).
+An unofficial, high-performance **Free API bridge** for **Gemini Enterprise** models (`gemini-4-argon`, `gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, and `gemini-3.1-pro-preview`) via Thailand AI Passport (TH-AI Passport).
 
-It exposes an authenticated local OpenAI-compatible endpoint, enabling Hermes to leverage Gemini Enterprise reasoning, extended context (1M tokens), and streaming across CLI, TUI, Desktop, and WebUI without interference from third-party commercial LLMs.
+Compatible with **OpenAI** and **Anthropic** API protocols, supporting **Hermes Agent** (CLI, TUI, Desktop, WebUI), **Claude Code**, **Cursor**, **Cline**, and any standard LLM client.
+
 
 > [!NOTE]
 > This bridge connects directly to Gemini Enterprise infrastructure with Mac-assisted authentication (Brave Browser session extraction on port 9222 and Keychain / `auth.json` fallback).
