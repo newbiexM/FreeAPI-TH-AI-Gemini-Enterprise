@@ -15,6 +15,10 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    __package__ = "hermes_aipass"
+
 from . import __version__
 from .auth import AuthError, KeychainStore, validate_auth
 from .cdp import interactive_login

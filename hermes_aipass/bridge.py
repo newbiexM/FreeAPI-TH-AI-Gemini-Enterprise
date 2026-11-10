@@ -13,6 +13,13 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+if __package__ in (None, ""):
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    __package__ = "hermes_aipass"
+
 from . import __version__
 from .auth import AuthError
 from .client import AiPassClient, ContentPolicyViolationError, ProtocolError
