@@ -22,7 +22,8 @@ if __package__ in (None, ""):
 from . import __version__
 from .auth import AuthError, KeychainStore, validate_auth
 from .cdp import interactive_login
-from .client import AiPassClient, ProtocolError
+from .client import ProtocolError
+from .transport import get_transport
 from .paths import hermes_home, launch_agent_path, logs_dir, runtime_dir, sessions_path
 from .sessions import SessionStore
 
@@ -111,15 +112,15 @@ def _bootout() -> None:
     _run(["launchctl", "bootout", _service_target()], check=False)
 
 
-def _start() -> None:
+def _start(force: bool = False) -> None:
     if platform.system() != "Darwin":
-        if _health():
+        if _health() and not force:
             return
         raise RuntimeError("AiPASS bridge daemon must be started on host or tunnel on Linux")
     path = launch_agent_path()
     if not path.exists():
         path = _write_launch_agent()
-    if _health():
+    if _health() and not force:
         return
     _run(["launchctl", "bootstrap", _domain(), str(path)], check=False)
     result = _run(["launchctl", "kickstart", "-k", _service_target()], check=False)
@@ -140,17 +141,17 @@ def _configure_provider(set_default: bool) -> None:
     settings = [
         ("providers.aipass.api", f"{DEFAULT_URL}/v1"),
         ("providers.aipass.transport", "chat_completions"),
-        ("providers.aipass.default_model", "gpt-5.6-sol"),
+        ("providers.aipass.default_model", "gemini-3.8-flash"),
         ("providers.aipass.discover_models", "true"),
-        ("providers.aipass.context_length", "128000"),
+        ("providers.aipass.context_length", "1000000"),
     ]
     if set_default:
         settings.extend(
             [
-                ("model.default", "gpt-5.6-sol"),
+                ("model.default", "gemini-3.8-flash"),
                 ("model.provider", "aipass"),
                 ("model.base_url", f"{DEFAULT_URL}/v1"),
-                ("model.context_length", "128000"),
+                ("model.context_length", "1000000"),
                 ("streaming.enabled", "true"),
             ]
         )
@@ -215,7 +216,7 @@ def _status() -> int:
 
 
 def _models(args: argparse.Namespace) -> int:
-    models = AiPassClient().models(refresh=bool(args.refresh))
+    models = get_transport().models(refresh=bool(args.refresh))
     for model in models:
         levels = f" [{'/'.join(model.thinking_levels)}]" if model.thinking_levels else ""
         print(f"{model.id:<44} {model.display_name}{levels}")
@@ -235,7 +236,7 @@ def _doctor() -> int:
         state = KeychainStore().load()
         validate_auth(state)
         checks.append(("authentication", True, state.expires_at or "server-managed"))
-        models = AiPassClient().models(refresh=True)
+        models = get_transport().models(refresh=True)
         checks.append(("model protocol", bool(models), f"{len(models)} Gemini Enterprise models"))
     except (AuthError, ProtocolError) as exc:
         checks.append(("authentication/upstream", False, str(exc)))
@@ -268,8 +269,7 @@ def dispatch(args: argparse.Namespace) -> int:
             print("AiPASS bridge stopped.")
             return 0
         if command == "restart":
-            _bootout()
-            _start()
+            _start(force=True)
             print("AiPASS bridge restarted.")
             return 0
         if command == "doctor":
