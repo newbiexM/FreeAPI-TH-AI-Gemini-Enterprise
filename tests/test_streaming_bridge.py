@@ -91,6 +91,35 @@ class TestStreamingBridge(unittest.TestCase):
 
         self.assertEqual("".join(collected_content), "Here is the final answer in Thai.")
 
+    @patch.object(Handler, "send_response")
+    @patch.object(Handler, "send_header")
+    @patch.object(Handler, "end_headers")
+    def test_stream_completion_recovers_from_rai_422(self, mock_end, mock_header, mock_resp):
+        from hermes_aipass.client import ContentPolicyViolationError
+        handler = Handler.__new__(Handler)
+        handler.rfile = io.BytesIO()
+        handler.wfile = io.BytesIO()
+        handler.headers = _make_headers({"X-AiPASS-Session-Id": "test-stream-rai"})
+
+        deltas = ["Recovered response after RAI policy retry."]
+        mock_client = MagicMock()
+        mock_client.create_conversation.return_value = "new-rai-cid"
+        mock_client.send_stream.return_value = iter(deltas)
+
+        handler._execute = MagicMock(side_effect=ContentPolicyViolationError("Content policy violation SCAM_FRAUD", code=422))
+        handler._complete_state = MagicMock()
+        handler._session_id = MagicMock(return_value="test-stream-rai")
+
+        with patch("hermes_aipass.bridge.RUNTIME.get_client", return_value=mock_client):
+            body = {"model": "gemini-4-argon", "stream": True}
+            messages = [{"role": "user", "content": "กู้เงิน บัตรกดเงินสด มิจฉาชีพ"}]
+            handler._stream_completion(body, messages, "gemini-4-argon")
+
+        written = handler.wfile.getvalue().decode("utf-8")
+        self.assertIn("Recovered response after RAI policy retry.", written)
+        self.assertIn("[DONE]", written)
+
+
 
     @patch.object(Handler, "send_response")
     @patch.object(Handler, "send_header")

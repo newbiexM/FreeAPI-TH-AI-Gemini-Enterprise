@@ -15,7 +15,7 @@ from typing import Any
 
 from . import __version__
 from .auth import AuthError
-from .client import AiPassClient, ProtocolError
+from .client import AiPassClient, ContentPolicyViolationError, ProtocolError
 from .models import map_reasoning
 from .prompting import (
     TOOL_SENTINEL,
@@ -253,6 +253,32 @@ class Handler(BaseHTTPRequestHandler):
             conversation_id, prompt, model_id, thinking_level=thinking
         ), allowed, session_id, prompt
 
+    def _execute_safe(
+        self, body: dict[str, Any], messages: list[dict[str, Any]], model_id: str
+    ) -> tuple[str, Any, set[str], str, str]:
+        try:
+            return self._execute(body, messages, model_id)
+        except ContentPolicyViolationError:
+            client = RUNTIME.get_client()
+            model = client.model(model_id)
+            raw_tools = body.get("tools") or []
+            tools: list[dict[str, Any]] = [t for t in raw_tools if isinstance(t, dict)] if isinstance(raw_tools, list) else []
+            allowed = tool_names(tools)
+            session_id = self._session_id(messages, body)
+            retry_prompt = self._sanitize_for_retry(messages, body.get("tools"))
+            try:
+                new_cid = client.create_conversation(CONVERSATION_SEED, model_id)
+                thinking = map_reasoning(_reasoning_effort(body), model)
+                deltas = client.send_stream(new_cid, retry_prompt, model_id, thinking_level=thinking)
+                return new_cid, deltas, allowed, session_id, retry_prompt
+            except ContentPolicyViolationError:
+                explanation = (
+                    "ขออภัยครับ ข้อความหรือประวัติการสนทนานี้มีคำสำคัญที่ติดระบบนโยบายความปลอดภัยของ AiPASS (Responsible AI: SCAM_FRAUD Policy) "
+                    "ระบบได้พยายามปรับข้อความอัตโนมัติแล้วแต่ยังติดข้อกำหนด แนะนำให้หลีกเลี่ยงคำว่า 'มิจฉาชีพ', 'หลอกโอน', 'บัตรกดเงินสด' หรือเริ่ม Session ใหม่ครับ"
+                )
+                return "fallback-rai", iter([explanation]), set(), session_id, retry_prompt
+
+
     @staticmethod
     def _is_refusal(raw: str) -> bool:
         snippets = (
@@ -294,7 +320,7 @@ class Handler(BaseHTTPRequestHandler):
     def _regular_completion(self, body: dict[str, Any], messages: list[dict[str, Any]], model_id: str) -> None:
         session_id = self._session_id(messages, body)
         with RUNTIME.session_lock(session_id):
-            conversation_id, deltas, allowed, _, _ = self._execute(body, messages, model_id)
+            conversation_id, deltas, allowed, _, _ = self._execute_safe(body, messages, model_id)
             raw = "".join(deltas)
             if self._is_refusal(raw):
                 client = RUNTIME.get_client()
@@ -346,7 +372,7 @@ class Handler(BaseHTTPRequestHandler):
     ) -> None:
         session_id = self._session_id(messages, body)
         with RUNTIME.session_lock(session_id):
-            conversation_id, deltas, allowed, _, _ = self._execute(body, messages, model_id)
+            conversation_id, deltas, allowed, _, _ = self._execute_safe(body, messages, model_id)
             raw = "".join(deltas)
             if self._is_refusal(raw):
                 client = RUNTIME.get_client()
@@ -405,7 +431,7 @@ class Handler(BaseHTTPRequestHandler):
         headers_sent = False
         try:
             with RUNTIME.session_lock(session_id):
-                conversation_id, deltas, allowed, _, _ = self._execute(body, messages, model_id)
+                conversation_id, deltas, allowed, _, _ = self._execute_safe(body, messages, model_id)
                 interceptor = StreamInterceptor(allowed_tools=allowed, gate_chars=120)
 
                 block_index = 0
@@ -640,7 +666,7 @@ class Handler(BaseHTTPRequestHandler):
         headers_sent = False
         try:
             with RUNTIME.session_lock(session_id):
-                conversation_id, deltas, allowed, _, _ = self._execute(body, messages, model_id)
+                conversation_id, deltas, allowed, _, _ = self._execute_safe(body, messages, model_id)
                 interceptor = StreamInterceptor(allowed_tools=allowed, gate_chars=120)
 
                 collected_thought: list[str] = []

@@ -26,6 +26,15 @@ class ProtocolError(RuntimeError):
     pass
 
 
+class ContentPolicyViolationError(ProtocolError):
+    def __init__(self, detail: str, code: int = 422, category: str = "SCAM_FRAUD") -> None:
+        super().__init__(f"AiPASS Content Policy Violation ({category}): {detail[:200]}")
+        self.detail = detail
+        self.code = code
+        self.category = category
+
+
+
 @dataclass
 class StreamResult:
     conversation_id: str
@@ -96,7 +105,12 @@ class AiPassClient:
                     "AiPASS denied this request (HTTP 403). The selected model may "
                     "require account access or paid credits."
                 ) from exc
+            if exc.code == 422:
+                if "CHAT_RAI_VIOLATION" in detail or "Content Policy Violation" in detail or "SCAM_FRAUD" in detail:
+                    raise ContentPolicyViolationError(detail, code=422, category="SCAM_FRAUD") from exc
+                raise ProtocolError(f"AiPASS returned HTTP 422: {detail[:400]}") from exc
             raise ProtocolError(f"AiPASS returned HTTP {exc.code}: {detail[:400]}") from exc
+
         except (URLError, TimeoutError) as exc:
             raise ProtocolError(f"AiPASS request failed: {exc}") from exc
 

@@ -36,6 +36,16 @@ class ClientErrorTests(unittest.TestCase):
             with self.assertRaisesRegex(ProtocolError, "account access or paid credits"):
                 self._client()._open(Request("https://de.aipass.net/chat.data"))
 
+    def test_422_rai_violation_raises_content_policy_error(self):
+        from hermes_aipass.client import ContentPolicyViolationError
+        body = b'{"error":"Chat service error: Unprocessable Entity","code":"CHAT_RAI_VIOLATION","category":"SCAM_FRAUD"}'
+        with patch("hermes_aipass.client.urlopen", side_effect=self._http_error(422, body)):
+            with self.assertRaises(ContentPolicyViolationError) as ctx:
+                self._client()._open(Request("https://de.aipass.net/chat.data"))
+            self.assertEqual(ctx.exception.category, "SCAM_FRAUD")
+            self.assertEqual(ctx.exception.code, 422)
+
+
     def test_legacy_or_unknown_model_falls_back_to_default(self):
         client = self._client()
         model = client.model("glm-5.3")

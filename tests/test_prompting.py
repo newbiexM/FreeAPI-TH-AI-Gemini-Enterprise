@@ -149,6 +149,16 @@ class PromptingTests(unittest.TestCase):
         self.assertIn("Analyzing Cash Card Feedback", msg["reasoning_content"])
         self.assertEqual(msg["content"], "สรุปผลตอบรับและฟีดแบคจริงจากผู้ใช้งาน")
 
+    def test_sanitizes_scam_and_fraud_keywords(self):
+        from hermes_aipass.prompting import sanitize_safety_text
+        text = "ระวังมิจฉาชีพหลอกให้โอนเงินค่าธรรมเนียม สมัครบัตรกดเงินสดหรือบัตรเครดิต"
+        clean = sanitize_safety_text(text)
+        self.assertNotIn("มิจฉาชีพ", clean)
+        self.assertNotIn("หลอกให้โอนเงิน", clean)
+        self.assertNotIn("บัตรกดเงินสด", clean)
+        self.assertNotIn("บัตรเครดิต", clean)
+
+
 
     def test_recency_bias_output_rules_at_prompt_end(self):
         prompt = bootstrap_prompt(
