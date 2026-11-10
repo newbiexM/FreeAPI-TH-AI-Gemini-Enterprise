@@ -12,6 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .auth import BASE_URL, AuthError, KeychainStore, apply_set_cookie
+from .accounts import Account, AccountPool, AllAccountsUnavailableError
 from .codec import decode_loader_bytes, extract_stream_events, text_delta, walk
 from .models import GEMINI_ENTERPRISE_MODELS, Model, extract_models
 
@@ -37,15 +38,27 @@ class AiPassClient:
         self.model_cache_ttl = model_cache_ttl
         self.store = KeychainStore()
         self.auth = self.store.load()
+        default_cookie = getattr(self.auth, "cookie_header", "")
+        self.pool = AccountPool.from_env(default_token=default_cookie)
+        self._current_account: Account | None = None
         self._models: list[Model] = []
         self._models_at = 0.0
         self._lock = threading.RLock()
 
     def _headers(self, *, accept: str = "application/json") -> dict[str, str]:
+        cookie = self.auth.cookie_header
+        try:
+            if self.pool.accounts:
+                self._current_account = self.pool.get_account()
+                if self._current_account and self._current_account.token:
+                    cookie = self._current_account.token
+        except Exception:
+            pass
+
         return {
             "Accept": accept,
             "Accept-Language": "en-US,en;q=0.9",
-            "Cookie": self.auth.cookie_header,
+            "Cookie": cookie,
             "Origin": BASE_URL,
             "Referer": f"{BASE_URL}/chat",
             "User-Agent": USER_AGENT,
@@ -57,13 +70,22 @@ class AiPassClient:
             self.store.save(self.auth)
 
     def _open(self, request: Request, *, timeout: float | None = None):
+        cur_acct = getattr(self, "_current_account", None)
         try:
             response = urlopen(request, timeout=timeout or self.timeout)
             self._update_auth(response)
+            if cur_acct:
+                cur_acct.report_ok()
             return response
         except HTTPError as exc:
             if exc.code == 401:
+                if cur_acct:
+                    cur_acct.report_dead("AiPASS session expired")
                 raise AuthError("AiPASS session expired; run `hermes aipass login`") from exc
+            if exc.code == 429:
+                if cur_acct:
+                    cur_acct.report_429()
+                raise ProtocolError(f"AiPASS rate limited (HTTP 429). Account cooling down.") from exc
             detail = ""
             try:
                 detail = exc.read(2048).decode("utf-8", errors="replace")
