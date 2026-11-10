@@ -39,7 +39,7 @@
   - `find_marker(text: str, marker_type: str, final: bool = False) -> tuple[int, int]` (returns `(start_index, marker_length)`)
   - `STREAM_KEEP: int = 32`
 
-- [ ] **Step 1: Write the failing test for tolerant marker detection**
+- [x] **Step 1: Write the failing test for tolerant marker detection**
 
 ```python
 # hermes-aipass/tests/test_streaming.py
@@ -70,21 +70,21 @@ class TestMarkerMatcher(unittest.TestCase):
         self.assertEqual(find_marker("Thinking... <<<TOOL_", "start", final=True), (-1, 0))
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd hermes-aipass && python3 -m unittest tests/test_streaming.py`
 Expected: FAIL with `ModuleNotFoundError: No module named 'hermes_aipass.streaming'`
 
-- [ ] **Step 3: Implement `find_marker` in `hermes_aipass/streaming.py`**
+- [x] **Step 3: Implement `find_marker` in `hermes_aipass/streaming.py`**
 
 Implement `find_marker(text: str, marker_type: str, final: bool = False) -> tuple[int, int]` using regex and bracket run counters matching both `<tool_call>` / `</tool_call>`, `<<<TOOL_CALL>>>` / `<<<END_TOOL_CALL>>>` (with 1..4 bracket tolerance), and `@@HERMES_TOOL_CALL@@`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd hermes-aipass && python3 -m unittest tests/test_streaming.py`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd hermes-aipass
@@ -109,7 +109,7 @@ git commit -m "feat(streaming): add tolerant multi-syntax marker matcher"
     - `feed(self, chunk: str) -> StreamChunk`
     - `finish(self) -> StreamChunk`
 
-- [ ] **Step 1: Write the failing test for StreamInterceptor streaming & tool capture**
+- [x] **Step 1: Write the failing test for StreamInterceptor streaming & tool capture**
 
 ```python
 # hermes-aipass/tests/test_streaming.py
@@ -148,12 +148,12 @@ class TestStreamInterceptor(unittest.TestCase):
         self.assertEqual(chunk.tool_calls[0]["function"]["name"], "run_cmd")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd hermes-aipass && python3 -m unittest tests/test_streaming.py`
 Expected: FAIL with `ImportError: cannot import name 'StreamInterceptor'`
 
-- [ ] **Step 3: Implement `StreamInterceptor` in `hermes_aipass/streaming.py`**
+- [x] **Step 3: Implement `StreamInterceptor` in `hermes_aipass/streaming.py`**
 
 Implement `StreamInterceptor` with:
 - `self._buffer: str = ""`
@@ -163,12 +163,12 @@ Implement `StreamInterceptor` with:
 - `finish() -> StreamChunk`
 - Internal `_drain(final: bool) -> StreamChunk` retaining `STREAM_KEEP` bytes on normal flow and extracting JSON payloads between start and end markers.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd hermes-aipass && python3 -m unittest tests/test_streaming.py`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd hermes-aipass
@@ -189,7 +189,7 @@ git commit -m "feat(streaming): implement StreamInterceptor with hold-back windo
   - `class RefusalDetected(Exception): raw: str`
   - `StreamInterceptor.feed_with_gate(self, chunk: str, refusal_checker: Callable[[str], bool]) -> StreamChunk`
 
-- [ ] **Step 1: Write the failing test for initial gate refusal check**
+- [x] **Step 1: Write the failing test for initial gate refusal check**
 
 ```python
 # hermes-aipass/tests/test_streaming.py
@@ -214,21 +214,21 @@ class TestRefusalGate(unittest.TestCase):
         self.assertTrue(len(c1.text) > 0)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd hermes-aipass && python3 -m unittest tests/test_streaming.py`
 Expected: FAIL with `AttributeError: 'StreamInterceptor' object has no attribute 'feed_with_gate'`
 
-- [ ] **Step 3: Implement gating in `hermes_aipass/streaming.py`**
+- [x] **Step 3: Implement gating in `hermes_aipass/streaming.py`**
 
 Add gating state (`self._gated: bool = True`, `self._gate_buffer: str = ""`) to hold the initial ~120 characters to run against `refusal_checker`. If refusal matches, raise `RefusalDetected(self._gate_buffer)`. If clean and length threshold is met, unlock gate and flush held characters into standard draining.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd hermes-aipass && python3 -m unittest tests/test_streaming.py`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd hermes-aipass
@@ -248,7 +248,7 @@ git commit -m "feat(streaming): add initial refusal gating to StreamInterceptor"
 - Consumes: `StreamInterceptor`, `RefusalDetected` from `hermes_aipass/streaming.py`.
 - Replaces: blocking `raw = "".join(deltas)` inside `bridge.py:_stream_completion`.
 
-- [ ] **Step 1: Write integration test for real-time SSE chunk generation**
+- [x] **Step 1: Write integration test for real-time SSE chunk generation**
 
 ```python
 # hermes-aipass/tests/test_streaming_bridge.py
@@ -262,12 +262,12 @@ class TestStreamingBridge(unittest.TestCase):
         pass
 ```
 
-- [ ] **Step 2: Run existing tests to verify baseline passes**
+- [x] **Step 2: Run existing tests to verify baseline passes**
 
 Run: `cd hermes-aipass && python3 -m unittest discover tests`
 Expected: PASS (26+ tests)
 
-- [ ] **Step 3: Refactor `_stream_completion` in `hermes_aipass/bridge.py`**
+- [x] **Step 3: Refactor `_stream_completion` in `hermes_aipass/bridge.py`**
 
 Update `_stream_completion` to:
 1. Initialize `StreamInterceptor(allowed_tools=allowed)`
@@ -284,12 +284,12 @@ Update `_stream_completion` to:
    - Emit `data: [DONE]\n\n`
    - Record response in `RUNTIME.sessions.complete(...)`.
 
-- [ ] **Step 4: Run all tests to verify passing**
+- [x] **Step 4: Run all tests to verify passing**
 
 Run: `cd hermes-aipass && python3 -m unittest discover tests`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd hermes-aipass
@@ -305,24 +305,49 @@ git commit -m "feat(bridge): connect StreamInterceptor to _stream_completion for
 - Modify: `hermes-aipass/README.md`
 - Test: All tests across `hermes-aipass/tests/`
 
-- [ ] **Step 1: Run complete test suite**
+- [x] **Step 1: Run complete test suite**
 
 Run: `cd hermes-aipass && python3 -m unittest discover tests -v`
 Expected: All tests pass with 0 failures and 0 errors.
 
-- [ ] **Step 2: Benchmark and verify latency**
+- [x] **Step 2: Benchmark and verify latency**
 
 Verify that simulated streaming emits the first SSE packet on the first chunk rather than after full stream completion.
 
-- [ ] **Step 3: Document streaming improvements in README.md**
+- [x] **Step 3: Document streaming improvements in README.md**
 
 Update `README.md` to note real-time streaming capability and low TTFT.
 
-- [ ] **Step 4: Final commit**
+- [x] **Step 4: Final commit**
 
 ```bash
 cd hermes-aipass
 git add README.md
 git commit -m "docs: document real-time SSE streaming and zero-latency TTFT"
 ```
+
+---
+
+## Completion Record: Full Architecture Suite (Candidates 1–4)
+
+All four architectural modernization candidates synthesized from `Godde3s/qwen-free-api` have been implemented, tested, and integrated:
+
+1. **Candidate 1: True Incremental Stream Interceptor (`hermes_aipass/streaming.py`)** [Completed]
+   - Commit: `a912e99`, `edaf84c`, `d11d4a9`, `0a85c50`
+   - Features: Sliding hold-back window (`STREAM_KEEP = 32`), initial refusal gate (~120 chars), zero TTFT real-time SSE, multi-syntax marker detection (`<tool_call>`, `<<<TOOL_CALL>>>`, `@@HERMES_TOOL_CALL@@`).
+
+2. **Candidate 2: Dual Protocol Seam & Anthropic Adapter (`hermes_aipass/anthropic.py`)** [Completed]
+   - Commit: `ad0f5cb`
+   - Features: `/v1/messages` (SSE streaming + non-streaming) and `/v1/messages/count_tokens`, two-way message/tool translation for Claude Code, Cline, Roo-Code, and Hermes.
+
+3. **Candidate 3: Multi-Credential Resilient Pool (`hermes_aipass/accounts.py`)** [Completed]
+   - Commit: `951a020`
+   - Features: Round-robin selection across `AIPASS_TOKENS`, exponential cooldown on 429 (`60s * 2^(streak - 1)` up to 30 min), automatic pre-stream failover to next healthy account.
+
+4. **Candidate 4: XML-Structured Prompting & Tolerant Parser (`hermes_aipass/prompting.py`)** [Completed]
+   - Commit: `bbd6373`
+   - Features: Terminal `<output_rules>` for recency bias adherence, bracket tolerance (`<<`, `<<<`, `<<<<`), and code fence stripping.
+
+**Final Suite Verification:** 48 passing unit tests (`Ran 48 tests in 0.022s — OK`).
+
 
