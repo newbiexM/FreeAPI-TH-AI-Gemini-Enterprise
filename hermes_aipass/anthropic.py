@@ -195,3 +195,4 @@ def openai_to_anthropic_response(openai_resp: dict[str, Any]) -> dict[str, Any]:
             "output_tokens": usage.get("completion_tokens", 0),
         },
     }
+

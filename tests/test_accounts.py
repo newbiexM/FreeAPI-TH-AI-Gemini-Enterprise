@@ -53,3 +53,4 @@ class TestAccountPool(unittest.TestCase):
         acct.report_ok()
         self.assertEqual(acct.consecutive_429s, 0)
         self.assertTrue(acct.is_available())
+
