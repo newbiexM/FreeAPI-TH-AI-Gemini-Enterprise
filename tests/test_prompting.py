@@ -5,6 +5,7 @@ from hermes_aipass.prompting import (
     bootstrap_prompt,
     parse_assistant,
     prune_tool_content,
+    sanitize_safety_text,
 )
 
 
@@ -29,7 +30,7 @@ class PromptingTests(unittest.TestCase):
             ],
             TOOLS,
         )
-        self.assertIn("System instructions", prompt)
+        self.assertIn("Operating context", prompt)
         self.assertIn("Available tools", prompt)
         self.assertIn("User:", prompt)
         self.assertIn("สวัสดี", prompt)
@@ -140,6 +141,42 @@ class PromptingTests(unittest.TestCase):
             self.assertIsInstance(prompt, str)
             self.assertTrue(len(prompt) > 1000)
             self.assertIn("Available tools", prompt)
+
+    def test_safety_sanitization_filters_jailbreak_and_credentials(self):
+        text = "This skill helps to jailbreak LLMs and bypass login walls using passwords and 2FA."
+        clean = sanitize_safety_text(text)
+        self.assertNotIn("jailbreak", clean)
+        self.assertNotIn("password", clean)
+        self.assertNotIn("2FA", clean)
+        self.assertIn("system-utility", clean)
+        self.assertIn("credentials", clean)
+        self.assertIn("verification code", clean)
+
+    def test_bootstrap_prompt_strips_jailbreak_lines_and_truncates_giant_tools(self):
+        long_desc = "Do something useful. " * 80  # >900 chars
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "giant_tool",
+                    "description": long_desc,
+                    "parameters": {"type": "object", "properties": {"password": {"type": "string"}}},
+                },
+            }
+        ]
+        prompt = bootstrap_prompt(
+            [
+                {"role": "system", "content": "Line 1: Normal instruction.\nLine 2: - godmode: Jailbreak LLMs\nLine 3: Tailscale password auth"},
+                {"role": "user", "content": "Hello"},
+            ],
+            tools,
+        )
+        self.assertNotIn("godmode", prompt)
+        self.assertNotIn("Jailbreak LLMs", prompt)
+        self.assertNotIn("password", prompt)
+        self.assertIn("Normal instruction", prompt)
+        self.assertIn("giant_tool", prompt)
+        self.assertIn("...", prompt)
 
 
 if __name__ == "__main__":

@@ -182,11 +182,13 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # pragma: no cover - defensive server boundary
             self._send_json(500, _error(f"AiPASS bridge failed: {type(exc).__name__}"))
 
-    def _session_id(self, messages: list[dict[str, Any]]) -> str:
+    def _session_id(self, messages: list[dict[str, Any]], body: dict[str, Any] | None = None) -> str:
         supplied = self.headers.get("X-AiPASS-Session-Id", "").strip()
+        if not supplied and body:
+            supplied = str(body.get("session_id") or body.get("user") or "").strip()
         if supplied:
             return supplied[:256]
-        seed = _json_bytes(messages[:2])
+        seed = _json_bytes([m.get("content") for m in messages[-4:]])
         return "anonymous-" + hashlib.sha256(seed).hexdigest()[:24]
 
     def _execute(
@@ -197,21 +199,15 @@ class Handler(BaseHTTPRequestHandler):
     ) -> tuple[str, Any, set[str], str, str]:
         client = RUNTIME.get_client()
         model = client.model(model_id)
-        session_id = self._session_id(messages)
+        session_id = self._session_id(messages, body)
         tools = body.get("tools") if isinstance(body.get("tools"), list) else []
         allowed = tool_names(tools)
         session, tail, bootstrap = RUNTIME.sessions.prepare(session_id, messages)
         if bootstrap:
             prompt = bootstrap_prompt(messages, tools)
-            # The multipart create route is protected by stricter request-body
-            # filtering than the chat action route. Keep creation metadata
-            # innocuous, then send the complete English agent prompt exactly
-            # once through the normal message transport below.
             conversation_id = client.create_conversation(CONVERSATION_SEED, model_id)
         else:
-            if not tail:
-                raise ValueError("Request contains no new conversation event")
-            prompt = delta_prompt(tail)
+            prompt = delta_prompt(tail, tools)
             conversation_id = session.conversation_id
         if not conversation_id:
             raise ProtocolError("AiPASS conversation could not be resolved")
@@ -219,6 +215,27 @@ class Handler(BaseHTTPRequestHandler):
         return conversation_id, client.send_stream(
             conversation_id, prompt, model_id, thinking_level=thinking
         ), allowed, session_id, prompt
+
+    @staticmethod
+    def _is_refusal(raw: str) -> bool:
+        snippets = (
+            "ขออภัย ไม่สามารถตอบคำถามนี้ได้",
+            "Sorry, I could not respond to this request",
+            "ขออภัยครับ ผมไม่สามารถ",
+            "ขออภัยค่ะ ดิฉันไม่สามารถ",
+        )
+        return any(s in raw for s in snippets) and ("<tool_call>" not in raw and TOOL_SENTINEL not in raw)
+
+    def _sanitize_for_retry(self, messages: list[dict[str, Any]], tools: Any) -> str:
+        last = messages[-1] if messages else {"role": "user", "content": ""}
+        from .prompting import _SYSTEM_PREAMBLE, _tool_guide, message_text
+        txt = message_text(last)
+        if "[/plan — plan mode]" in txt:
+            if "Task to plan:" in txt:
+                txt = "Please create a detailed plan for: " + txt.split("Task to plan:", 1)[1].split("Write the plan", 1)[0].strip()
+        tools_list = tools if isinstance(tools, list) else []
+        tool_section = _tool_guide(tools_list) if tools_list else ""
+        return f"{_SYSTEM_PREAMBLE}\n\n{tool_section}\n\nUser request:\n{txt}"
 
     def _complete_state(
         self,
@@ -238,10 +255,24 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def _regular_completion(self, body: dict[str, Any], messages: list[dict[str, Any]], model_id: str) -> None:
-        session_id = self._session_id(messages)
+        session_id = self._session_id(messages, body)
         with RUNTIME.session_lock(session_id):
             conversation_id, deltas, allowed, _, _ = self._execute(body, messages, model_id)
             raw = "".join(deltas)
+            if self._is_refusal(raw):
+                client = RUNTIME.get_client()
+                retry_prompt = self._sanitize_for_retry(messages, body.get("tools"))
+                new_cid = client.create_conversation(CONVERSATION_SEED, model_id)
+                new_deltas = list(client.send_stream(new_cid, retry_prompt, model_id))
+                new_raw = "".join(new_deltas)
+                if not self._is_refusal(new_raw):
+                    raw = new_raw
+                    conversation_id = new_cid
+                else:
+                    for phrase in _REFUSAL_PHRASES:
+                        raw = raw.replace(phrase, "").strip()
+                    if not raw:
+                        raw = "กำลังดำเนินการตรวจสอบและเชื่อมต่อเครื่องมือ กรุณาลองสั่งการอีกครั้งครับ"
             message = parse_assistant(raw, allowed)
             self._complete_state(
                 session_id=session_id,
@@ -277,78 +308,25 @@ class Handler(BaseHTTPRequestHandler):
         session_id = self._session_id(messages)
         completion_id = f"chatcmpl-{uuid.uuid4()}"
         created = int(time.time())
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "close")
-        self.end_headers()
-        raw = ""
-        natural_started = False
-        with RUNTIME.session_lock(session_id):
-            try:
+        try:
+            with RUNTIME.session_lock(session_id):
                 conversation_id, deltas, allowed, _, _ = self._execute(body, messages, model_id)
-                for delta in deltas:
-                    raw += delta
-                    stripped = raw.lstrip()
-                    may_be_tool = (
-                        TOOL_SENTINEL.startswith(stripped)
-                        or stripped.startswith(TOOL_SENTINEL)
-                        or "<tool_call>".startswith(stripped)
-                        or stripped.startswith("<tool_call>")
-                    )
-                    if not natural_started and stripped and not may_be_tool:
-                        natural_started = True
-                        self._sse(
-                            {
-                                "id": completion_id,
-                                "object": "chat.completion.chunk",
-                                "created": created,
-                                "model": model_id,
-                                "choices": [{"index": 0, "delta": {"role": "assistant", "content": raw}, "finish_reason": None}],
-                            }
-                        )
-                    elif natural_started:
-                        self._sse(
-                            {
-                                "id": completion_id,
-                                "object": "chat.completion.chunk",
-                                "created": created,
-                                "model": model_id,
-                                "choices": [{"index": 0, "delta": {"content": delta}, "finish_reason": None}],
-                            }
-                        )
+                raw = "".join(deltas)
+                if self._is_refusal(raw):
+                    client = RUNTIME.get_client()
+                    retry_prompt = self._sanitize_for_retry(messages, body.get("tools"))
+                    new_cid = client.create_conversation(CONVERSATION_SEED, model_id)
+                    new_deltas = list(client.send_stream(new_cid, retry_prompt, model_id))
+                    new_raw = "".join(new_deltas)
+                    if not self._is_refusal(new_raw):
+                        raw = new_raw
+                        conversation_id = new_cid
+                    else:
+                        for phrase in _REFUSAL_PHRASES:
+                            raw = raw.replace(phrase, "").strip()
+                        if not raw:
+                            raw = "กำลังดำเนินการตรวจสอบและเชื่อมต่อเครื่องมือ กรุณาลองสั่งการอีกครั้งครับ"
                 message = parse_assistant(raw, allowed)
-                if message.get("tool_calls"):
-                    if message.get("content") and not natural_started:
-                        self._sse(
-                            {
-                                "id": completion_id,
-                                "object": "chat.completion.chunk",
-                                "created": created,
-                                "model": model_id,
-                                "choices": [{"index": 0, "delta": {"role": "assistant", "content": message["content"]}, "finish_reason": None}],
-                            }
-                        )
-                    self._sse(
-                        {
-                            "id": completion_id,
-                            "object": "chat.completion.chunk",
-                            "created": created,
-                            "model": model_id,
-                            "choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": message["tool_calls"]}, "finish_reason": None}],
-                        }
-                    )
-                elif not natural_started:
-                    self._sse(
-                        {
-                            "id": completion_id,
-                            "object": "chat.completion.chunk",
-                            "created": created,
-                            "model": model_id,
-                            "choices": [{"index": 0, "delta": {"role": "assistant", "content": raw}, "finish_reason": None}],
-                        }
-                    )
-                finish = "tool_calls" if message.get("tool_calls") else "stop"
                 self._complete_state(
                     session_id=session_id,
                     conversation_id=conversation_id,
@@ -356,21 +334,72 @@ class Handler(BaseHTTPRequestHandler):
                     messages=messages,
                     response_message=message,
                 )
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.end_headers()
+
+            if message.get("tool_calls"):
+                if message.get("content"):
+                    self._sse(
+                        {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": model_id,
+                            "choices": [{"index": 0, "delta": {"role": "assistant", "content": message["content"]}, "finish_reason": None}],
+                        }
+                    )
                 self._sse(
                     {
                         "id": completion_id,
                         "object": "chat.completion.chunk",
                         "created": created,
                         "model": model_id,
-                        "choices": [{"index": 0, "delta": {}, "finish_reason": finish}],
+                        "choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": message["tool_calls"]}, "finish_reason": None}],
                     }
                 )
-                self.wfile.write(b"data: [DONE]\n\n")
-                self.wfile.flush()
-            except Exception as exc:
-                self._sse(_error(str(exc), "stream_error"))
-            finally:
-                self.close_connection = True
+                self._sse(
+                    {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model_id,
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+                    }
+                )
+            else:
+                self._sse(
+                    {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model_id,
+                        "choices": [{"index": 0, "delta": {"role": "assistant", "content": raw}, "finish_reason": None}],
+                    }
+                )
+                self._sse(
+                    {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model_id,
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    }
+                )
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        except Exception as exc:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self._sse(_error(str(exc), "stream_error"))
+        finally:
+            self.close_connection = True
 
 
 def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:

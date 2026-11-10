@@ -50,6 +50,8 @@ class SessionStore:
             if tail and tail[0].get("role") == "assistant":
                 if message_fingerprint(tail[0]) == session.last_response_fingerprint:
                     tail.pop(0)
+            if not tail:
+                return session, [messages[-1]] if messages else [], False
             return session, tail, False
 
     def complete(
