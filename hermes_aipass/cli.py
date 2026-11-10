@@ -102,10 +102,16 @@ def _write_launch_agent() -> Path:
 
 
 def _bootout() -> None:
+    if platform.system() != "Darwin":
+        return
     _run(["launchctl", "bootout", _service_target()], check=False)
 
 
 def _start() -> None:
+    if platform.system() != "Darwin":
+        if _health():
+            return
+        raise RuntimeError("AiPASS bridge daemon must be started on host or tunnel on Linux")
     path = launch_agent_path()
     if not path.exists():
         path = _write_launch_agent()
@@ -214,9 +220,11 @@ def _models(args: argparse.Namespace) -> int:
 
 def _doctor() -> int:
     checks: list[tuple[str, bool, str]] = []
-    checks.append(("platform", platform.system() == "Darwin", platform.system()))
+    is_darwin = platform.system() == "Darwin"
+    checks.append(("platform", True, f"{platform.system()} ({'native macOS' if is_darwin else 'tunnel / container'})"))
     checks.append(("plugin manifest", (_plugin_root() / "plugin.yaml").exists(), str(_plugin_root())))
-    checks.append(("LaunchAgent", launch_agent_path().exists(), str(launch_agent_path())))
+    if is_darwin:
+        checks.append(("LaunchAgent", launch_agent_path().exists(), str(launch_agent_path())))
     health = _health()
     checks.append(("bridge", bool(health), DEFAULT_URL))
     try:
