@@ -20,6 +20,7 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.pyright]
-extraPaths = ["."]
+include = [".", "hermes_aipass", "tests"]
+extraPaths = [".", "hermes_aipass"]
 
 

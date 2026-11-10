@@ -1,0 +1,12 @@
+{
+  "python.analysis.autoSearchPaths": true,
+  "python.analysis.extraPaths": [
+    ".",
+    "hermes_aipass"
+  ],
+  "python.autoComplete.extraPaths": [
+    ".",
+    "hermes_aipass"
+  ]
+}
+

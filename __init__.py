@@ -1,7 +1,11 @@
 """Hermes AiPASS plugin entrypoint."""
 
-from .hermes_aipass.cli import dispatch, register_cli
-from .hermes_aipass.middleware import attach_session_header
+try:
+    from hermes_aipass.cli import dispatch, register_cli
+    from hermes_aipass.middleware import attach_session_header
+except ImportError:
+    from .hermes_aipass.cli import dispatch, register_cli  # type: ignore[import-not-found]
+    from .hermes_aipass.middleware import attach_session_header  # type: ignore[import-not-found]
 
 
 def register(ctx) -> None:
