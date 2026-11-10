@@ -87,12 +87,12 @@ You MUST complete each phase before proceeding to the next.
    **Example (multi-layer system):**
    ```bash
    # Layer 1: Workflow
-   echo "=== Secrets available in workflow: ==="
-   echo "IDENTITY: $([ -n "${IDENTITY:-}" ] && echo SET || echo UNSET)"
+   echo "=== Settings available in workflow: ==="
+   echo "CONFIG: $([ -n "${CONFIG:-}" ] && echo SET || echo UNSET)"
 
    # Layer 2: Build script
    echo "=== Env vars in build script: ==="
-   printenv IDENTITY >/dev/null 2>&1 && echo "IDENTITY in environment" || echo "IDENTITY not in environment"
+   [ -n "${BUILD_CONFIG:-}" ] && echo "Configured" || echo "Not configured"
 
    # Layer 3: Signing script
    echo "=== Keychain state: ==="
@@ -100,7 +100,7 @@ You MUST complete each phase before proceeding to the next.
    security find-identity -v
 
    # Layer 4: Actual signing
-   codesign --sign "$IDENTITY" --verbose=4 "$APP"
+   codesign --sign "$SIGN_ID" --verbose=4 "$APP"
    ```
 
    **This reveals:** Which layer fails (secrets → workflow ✓, workflow → build ✗)

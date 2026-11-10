@@ -26,7 +26,6 @@ DEFAULT_CSESIDX = os.environ.get(
 )
 DISCOVERY_ENGINE_BASE = "https://content-us-discoveryengine.googleapis.com/v1alpha/locations/us"
 AUTH_PORTAL_BASE = "https://vertexaisearch.cloud.google"
-SERVER_TOKEN = "CAMSEhUJkbnfNfbABdnkpQHnxXQdBw=="
 API_CLIENT_HEADER = "gemini-enterprise-classic/1.0.0"
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -227,7 +226,6 @@ class DiscoveryEngineTransport:
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {jwt}",
                     "X-Goog-Api-Client": API_CLIENT_HEADER,
-                    "X-Server-Token": SERVER_TOKEN,
                     "Origin": AUTH_PORTAL_BASE,
                     "Referer": f"{AUTH_PORTAL_BASE}/",
                     "User-Agent": USER_AGENT,
@@ -310,7 +308,6 @@ class DiscoveryEngineTransport:
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {jwt}",
                     "X-Goog-Api-Client": API_CLIENT_HEADER,
-                    "X-Server-Token": SERVER_TOKEN,
                     "Origin": AUTH_PORTAL_BASE,
                     "Referer": f"{AUTH_PORTAL_BASE}/",
                     "User-Agent": USER_AGENT,
