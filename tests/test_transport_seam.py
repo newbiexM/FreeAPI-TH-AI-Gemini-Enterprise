@@ -69,3 +69,4 @@ class TestTransportSeam(unittest.TestCase):
                 "<thought>Processing request in Vertex...</thought>",
                 "Gemini Enterprise!",
             ])
+

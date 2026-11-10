@@ -6,7 +6,7 @@
 Extend the existing Hermes AiPASS bridge to use the Gemini Enterprise access reached through `https://de.aipass.net/ge/open`, using TH-AI Passport entitlement, running independently of the Mac inside the Hermes container, and supporting Hermes conversation and tool use when proven feasible.
 
 ## Scope and constraints
-- Project: `/Users/timem/Desktop/DevEm/hermes-TH-Ai-Pass_gemini-enterprise/hermes-aipass` on the Mac, reachable using `mac-zed-workspace` MCP. Current inspected commit: `2111987`; recheck status before editing; untracked `skills/` must be preserved.
+- Project: `hermes-aipass` workspace. Current inspected commit: `2111987`; recheck status before editing; untracked `skills/` must be preserved.
 - Preserve existing AiPASS provider, account, functionality, state, and default model. New backend must be opt-in. Do not publish bridge or bind beyond loopback.
 - User requires TH-AI Passport's own entitlement and container runtime without ongoing Mac dependency. Separate paid Google Cloud entitlement is not a substitute. The user has not answered whether login may initially require the Mac, nor whether an unofficial interface is acceptable.
 - The established browser security boundary prohibits copying cookies, browser storage, profiles, or tokens from the Mac to Linux. Do not ask user to paste credentials into chat. If no supported authorization mechanism meets both constraints, stop: seek the user's decision on an approved design; do not silently weaken the boundary.

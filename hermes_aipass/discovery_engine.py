@@ -159,3 +159,4 @@ class DiscoveryEngineTransport:
         finally:
             if hasattr(response, "close"):
                 response.close()
+

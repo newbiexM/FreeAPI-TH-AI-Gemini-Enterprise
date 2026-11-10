@@ -12,6 +12,12 @@ license = { text = "MIT" }
 authors = [{ name = "Timothy Pratumrut / Yeet2042" }]
 dependencies = []
 
+[project.scripts]
+freeapi-bridge = "hermes_aipass.bridge:main"
+aipass-bridge = "hermes_aipass.bridge:main"
+hermes-aipass = "hermes_aipass.cli:main"
+
+
 [tool.setuptools.packages.find]
 include = ["hermes_aipass*"]
 

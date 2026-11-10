@@ -55,3 +55,4 @@ class TestEnterpriseAuth(unittest.TestCase):
         )
         result = validate_auth(state)
         self.assertTrue(result.get("valid"))
+

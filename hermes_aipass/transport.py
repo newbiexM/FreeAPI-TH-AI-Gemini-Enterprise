@@ -48,3 +48,4 @@ def get_transport(name: str | None = None) -> Transport:
 
     from .client import AiPassClient
     return AiPassClient()
+

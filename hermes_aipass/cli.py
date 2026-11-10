@@ -275,3 +275,15 @@ def dispatch(args: argparse.Namespace) -> int:
     except (AuthError, ProtocolError, RuntimeError) as exc:
         print(f"AiPASS error: {exc}", file=sys.stderr)
         return 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="hermes-aipass", description="AiPASS and Gemini Enterprise Bridge CLI")
+    register_cli(parser)
+    args = parser.parse_args()
+    return dispatch(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
