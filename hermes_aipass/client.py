@@ -190,7 +190,7 @@ class AiPassClient:
             payload = response.read()
         try:
             decoded = decode_loader_bytes(payload)
-        except (ValueError, json.JSONDecodeError) as exc:
+        except ValueError as exc:
             raise ProtocolError("AiPASS create-conversation response could not be decoded") from exc
         conversation_id = self._conversation_id(decoded)
         if not conversation_id:
