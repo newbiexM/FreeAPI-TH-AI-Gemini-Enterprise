@@ -106,7 +106,14 @@ def _from_record(record: dict[str, Any]) -> Model | None:
     model_id = record.get("id")
     display_name = record.get("displayName")
     provider = record.get("provider")
-    if not all(isinstance(item, str) and item for item in (model_id, display_name, provider)):
+    if not (
+        isinstance(model_id, str)
+        and isinstance(display_name, str)
+        and isinstance(provider, str)
+        and model_id
+        and display_name
+        and provider
+    ):
         return None
     if not is_conversation_model(model_id):
         return None

@@ -78,7 +78,8 @@ class PromptingTests(unittest.TestCase):
 
     def test_prunes_historical_tool_outputs(self):
         # Create 10 tool outputs of length 500
-        messages = [{"role": "user", "content": "Run tests"}]
+        from typing import Any
+        messages: list[dict[str, Any]] = [{"role": "user", "content": "Run tests"}]
         for i in range(10):
             messages.append({"role": "assistant", "tool_calls": [{"id": f"c_{i}", "function": {"name": "terminal"}}]})
             messages.append({"role": "tool", "name": "terminal", "content": f"output_{i} " * 50})

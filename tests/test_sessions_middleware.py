@@ -73,6 +73,8 @@ class SessionMiddlewareTests(unittest.TestCase):
             base_url="http://127.0.0.1:8792/v1",
             session_id="session-123",
         )
+        self.assertIsNotNone(result)
+        assert result is not None
         self.assertEqual(result["request"]["extra_headers"]["X-AiPASS-Session-Id"], "session-123")
         self.assertIsNone(
             attach_session_header(

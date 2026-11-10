@@ -1,3 +1,4 @@
+import email.message
 import io
 import unittest
 from unittest.mock import patch
@@ -21,7 +22,7 @@ class ClientErrorTests(unittest.TestCase):
             "https://de.aipass.net/chat.data",
             status,
             "error",
-            {},
+            email.message.Message(),
             io.BytesIO(body),
         )
 

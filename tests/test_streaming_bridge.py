@@ -1,9 +1,18 @@
+import email.message
 import io
 import json
 import unittest
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from hermes_aipass.bridge import Handler, RUNTIME
+
+
+def _make_headers(mapping: dict[str, str]) -> Any:
+    msg = email.message.Message()
+    for k, v in mapping.items():
+        msg[k] = v
+    return msg
 
 
 class DummyRequest:
@@ -22,7 +31,7 @@ class TestStreamingBridge(unittest.TestCase):
         handler = Handler.__new__(Handler)
         handler.rfile = io.BytesIO()
         handler.wfile = io.BytesIO()
-        handler.headers = {"X-AiPASS-Session-Id": "test-stream-sess"}
+        handler.headers = _make_headers({"X-AiPASS-Session-Id": "test-stream-sess"})
 
         # Mock execute returning a multi-chunk delta generator
         deltas = ["Hello ", "world, ", "this is ", "realtime streaming!"]
@@ -50,7 +59,7 @@ class TestStreamingBridge(unittest.TestCase):
         handler = Handler.__new__(Handler)
         handler.rfile = io.BytesIO()
         handler.wfile = io.BytesIO()
-        handler.headers = {"X-AiPASS-Session-Id": "test-stream-tool"}
+        handler.headers = _make_headers({"X-AiPASS-Session-Id": "test-stream-tool"})
 
         deltas = [
             "Let me check that.\n",
@@ -81,7 +90,7 @@ class TestStreamingBridge(unittest.TestCase):
         handler = Handler.__new__(Handler)
         handler.rfile = io.BytesIO()
         handler.wfile = io.BytesIO()
-        handler.headers = {"X-AiPASS-Session-Id": "test-refusal-retry"}
+        handler.headers = _make_headers({"X-AiPASS-Session-Id": "test-refusal-retry"})
 
         # First attempt returns a refusal snippet, retry returns valid text
         first_deltas = ["ขออภัย ไม่สามารถตอบคำถามนี้ได้"]

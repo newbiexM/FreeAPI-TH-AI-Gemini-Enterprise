@@ -107,6 +107,7 @@ class TestAnthropicAdapter(unittest.TestCase):
     def test_bridge_count_tokens_and_messages_endpoints(self):
         import io
         from unittest.mock import MagicMock, patch
+        import email.message
         from hermes_aipass.bridge import Handler
 
         handler = Handler.__new__(Handler)
@@ -114,7 +115,9 @@ class TestAnthropicAdapter(unittest.TestCase):
         handler.requestline = "POST /v1/messages/count_tokens HTTP/1.1"
         handler.request_version = "HTTP/1.1"
         handler.rfile = io.BytesIO(b'{"messages":[{"role":"user","content":"count me"}],"system":"test"}')
-        handler.headers = {"Content-Length": str(len(handler.rfile.getvalue()))}
+        headers = email.message.Message()
+        headers["Content-Length"] = str(len(handler.rfile.getvalue()))
+        handler.headers = headers
         handler.wfile = io.BytesIO()
         handler.path = "/v1/messages/count_tokens"
 

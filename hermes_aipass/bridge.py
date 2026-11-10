@@ -37,6 +37,15 @@ DEFAULT_PORT = 8792
 MAX_REQUEST_BYTES = 50 * 1024 * 1024
 CONVERSATION_SEED = "Hermes CLI session"
 
+_REFUSAL_PHRASES: tuple[str, ...] = (
+    "ขออภัย ไม่สามารถตอบคำถามนี้ได้",
+    "Sorry, I could not respond to this request",
+    "ขออภัยครับ ผมไม่สามารถ",
+    "ขออภัยค่ะ ดิฉันไม่สามารถ",
+    "I cannot access your files",
+    "I am unable to execute",
+)
+
 
 class BridgeRuntime:
     def __init__(self, client: AiPassClient | None = None, sessions: SessionStore | None = None) -> None:
@@ -103,7 +112,7 @@ def _normalize_model_id(model_id: str) -> str:
 class Handler(BaseHTTPRequestHandler):
     server_version = "HermesGeminiEnterprise/0.1"
 
-    def log_message(self, fmt: str, *args: Any) -> None:
+    def log_message(self, format: str, *args: Any) -> None:
         # Do not log headers, bodies, account data, or query strings.
         cmd = getattr(self, "command", "HTTP")
         path = getattr(self, "path", "/")
@@ -227,7 +236,8 @@ class Handler(BaseHTTPRequestHandler):
         client = RUNTIME.get_client()
         model = client.model(model_id)
         session_id = self._session_id(messages, body)
-        tools = body.get("tools") if isinstance(body.get("tools"), list) else []
+        raw_tools = body.get("tools")
+        tools: list[dict[str, Any]] = [t for t in raw_tools if isinstance(t, dict)] if isinstance(raw_tools, list) else []
         allowed = tool_names(tools)
         session, tail, bootstrap = RUNTIME.sessions.prepare(session_id, messages)
         if bootstrap:
@@ -573,12 +583,12 @@ class Handler(BaseHTTPRequestHandler):
         session_id = self._session_id(messages, body)
         completion_id = f"chatcmpl-{uuid.uuid4()}"
         created = int(time.time())
+        headers_sent = False
         try:
             with RUNTIME.session_lock(session_id):
                 conversation_id, deltas, allowed, _, _ = self._execute(body, messages, model_id)
                 interceptor = StreamInterceptor(allowed_tools=allowed, gate_chars=120)
 
-                headers_sent = False
                 collected_text: list[str] = []
                 collected_tool_calls: list[dict[str, Any]] = []
 
