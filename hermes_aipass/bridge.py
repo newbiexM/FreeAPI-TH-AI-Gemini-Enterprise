@@ -26,6 +26,11 @@ from .prompting import (
 )
 from .sessions import SessionStore
 from .streaming import RefusalDetected, StreamInterceptor
+from .anthropic import (
+    anthropic_to_openai_request,
+    estimate_tokens,
+    openai_to_anthropic_response,
+)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8792
@@ -100,7 +105,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt: str, *args: Any) -> None:
         # Do not log headers, bodies, account data, or query strings.
-        print(f"aipass-bridge: {self.command} {self.path.split('?', 1)[0]} {args[1] if len(args) > 1 else ''}")
+        cmd = getattr(self, "command", "HTTP")
+        path = getattr(self, "path", "/")
+        print(f"aipass-bridge: {cmd} {path.split('?', 1)[0]} {args[1] if len(args) > 1 else ''}")
 
     def _send_json(self, status: int, value: Any) -> None:
         payload = _json_bytes(value)
@@ -155,10 +162,29 @@ class Handler(BaseHTTPRequestHandler):
             return False
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path not in {"/v1/chat/completions", "/chat/completions"}:
-            self._send_json(404, _error("Not found", "not_found"))
-            return
         try:
+            # 1. Anthropic count_tokens endpoint
+            if self.path in {"/v1/messages/count_tokens", "/messages/count_tokens"}:
+                body = self._body()
+                self._send_json(200, {"input_tokens": estimate_tokens(body)})
+                return
+
+            # 2. Anthropic messages endpoint
+            if self.path in {"/v1/messages", "/messages"}:
+                body = self._body()
+                openai_body, messages, model_id = anthropic_to_openai_request(body)
+                if not messages:
+                    raise ValueError("messages must be a non-empty array")
+                if openai_body.get("stream"):
+                    self._stream_anthropic_completion(body, openai_body, messages, model_id)
+                else:
+                    self._regular_anthropic_completion(body, openai_body, messages, model_id)
+                return
+
+            # 3. Standard OpenAI chat completions endpoint
+            if self.path not in {"/v1/chat/completions", "/chat/completions"}:
+                self._send_json(404, _error("Not found", "not_found"))
+                return
             body = self._body()
             messages = body.get("messages")
             if not isinstance(messages, list) or not messages or not all(isinstance(item, dict) for item in messages):
@@ -300,6 +326,244 @@ class Handler(BaseHTTPRequestHandler):
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
             },
         )
+
+    def _regular_anthropic_completion(
+        self,
+        raw_body: dict[str, Any],
+        body: dict[str, Any],
+        messages: list[dict[str, Any]],
+        model_id: str,
+    ) -> None:
+        session_id = self._session_id(messages, body)
+        with RUNTIME.session_lock(session_id):
+            conversation_id, deltas, allowed, _, _ = self._execute(body, messages, model_id)
+            raw = "".join(deltas)
+            if self._is_refusal(raw):
+                client = RUNTIME.get_client()
+                retry_prompt = self._sanitize_for_retry(messages, body.get("tools"))
+                new_cid = client.create_conversation(CONVERSATION_SEED, model_id)
+                new_deltas = list(client.send_stream(new_cid, retry_prompt, model_id))
+                new_raw = "".join(new_deltas)
+                if not self._is_refusal(new_raw):
+                    raw = new_raw
+                    conversation_id = new_cid
+                else:
+                    for phrase in _REFUSAL_PHRASES:
+                        raw = raw.replace(phrase, "").strip()
+                    if not raw:
+                        raw = "กำลังดำเนินการตรวจสอบและเชื่อมต่อเครื่องมือ กรุณาลองสั่งการอีกครั้งครับ"
+            message = parse_assistant(raw, allowed)
+            self._complete_state(
+                session_id=session_id,
+                conversation_id=conversation_id,
+                model_id=model_id,
+                messages=messages,
+                response_message=message,
+            )
+        completion_id = f"chatcmpl-{uuid.uuid4()}"
+        openai_resp = {
+            "id": completion_id,
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model_id,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": message,
+                    "finish_reason": "tool_calls" if message.get("tool_calls") else "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
+        anth_resp = openai_to_anthropic_response(openai_resp)
+        self._send_json(200, anth_resp)
+
+    def _anthropic_sse(self, event: str, data: Any) -> None:
+        self.wfile.write(f"event: {event}\n".encode("utf-8"))
+        self.wfile.write(b"data: " + _json_bytes(data) + b"\n\n")
+        self.wfile.flush()
+
+    def _stream_anthropic_completion(
+        self,
+        raw_body: dict[str, Any],
+        body: dict[str, Any],
+        messages: list[dict[str, Any]],
+        model_id: str,
+    ) -> None:
+        session_id = self._session_id(messages, body)
+        msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+        headers_sent = False
+        try:
+            with RUNTIME.session_lock(session_id):
+                conversation_id, deltas, allowed, _, _ = self._execute(body, messages, model_id)
+                interceptor = StreamInterceptor(allowed_tools=allowed, gate_chars=120)
+
+                block_index = 0
+                text_block_open = False
+                collected_text: list[str] = []
+                collected_tool_calls: list[dict[str, Any]] = []
+
+                def _ensure_headers() -> None:
+                    nonlocal headers_sent
+                    if not headers_sent:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/event-stream")
+                        self.send_header("Cache-Control", "no-cache")
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                        headers_sent = True
+                        self._anthropic_sse("message_start", {
+                            "type": "message_start",
+                            "message": {
+                                "id": msg_id,
+                                "type": "message",
+                                "role": "assistant",
+                                "model": model_id,
+                                "content": [],
+                                "stop_reason": None,
+                                "stop_sequence": None,
+                                "usage": {"input_tokens": 0, "output_tokens": 0},
+                            },
+                        })
+
+                delta_iter = iter(deltas)
+                while True:
+                    try:
+                        delta = next(delta_iter)
+                    except StopIteration:
+                        break
+
+                    try:
+                        chunk = interceptor.feed_with_gate(delta, self._is_refusal)
+                    except RefusalDetected:
+                        client = RUNTIME.get_client()
+                        retry_prompt = self._sanitize_for_retry(messages, body.get("tools"))
+                        new_cid = client.create_conversation(CONVERSATION_SEED, model_id)
+                        delta_iter = iter(client.send_stream(new_cid, retry_prompt, model_id))
+                        conversation_id = new_cid
+                        interceptor = StreamInterceptor(allowed_tools=allowed, gate_chars=120)
+                        continue
+
+                    if chunk.text:
+                        _ensure_headers()
+                        if not text_block_open:
+                            self._anthropic_sse("content_block_start", {
+                                "type": "content_block_start",
+                                "index": block_index,
+                                "content_block": {"type": "text", "text": ""},
+                            })
+                            text_block_open = True
+                        self._anthropic_sse("content_block_delta", {
+                            "type": "content_block_delta",
+                            "index": block_index,
+                            "delta": {"type": "text_delta", "text": chunk.text},
+                        })
+                        collected_text.append(chunk.text)
+
+                    if chunk.tool_calls:
+                        _ensure_headers()
+                        if text_block_open:
+                            self._anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
+                            block_index += 1
+                            text_block_open = False
+                        for tc in chunk.tool_calls:
+                            tc_id = tc.get("id") or f"toolu_{uuid.uuid4().hex[:20]}"
+                            tc_fn = tc.get("function") or {}
+                            name = tc_fn.get("name") or "unknown"
+                            args_str = tc_fn.get("arguments") or "{}"
+                            self._anthropic_sse("content_block_start", {
+                                "type": "content_block_start",
+                                "index": block_index,
+                                "content_block": {"type": "tool_use", "id": tc_id, "name": name, "input": {}},
+                            })
+                            self._anthropic_sse("content_block_delta", {
+                                "type": "content_block_delta",
+                                "index": block_index,
+                                "delta": {"type": "input_json_delta", "partial_json": args_str},
+                            })
+                            self._anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
+                            block_index += 1
+                            collected_tool_calls.append(tc)
+
+                tail = interceptor.finish()
+                if tail.text:
+                    _ensure_headers()
+                    if not text_block_open:
+                        self._anthropic_sse("content_block_start", {
+                            "type": "content_block_start",
+                            "index": block_index,
+                            "content_block": {"type": "text", "text": ""},
+                        })
+                        text_block_open = True
+                    self._anthropic_sse("content_block_delta", {
+                        "type": "content_block_delta",
+                        "index": block_index,
+                        "delta": {"type": "text_delta", "text": tail.text},
+                    })
+                    collected_text.append(tail.text)
+
+                if tail.tool_calls:
+                    _ensure_headers()
+                    if text_block_open:
+                        self._anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
+                        block_index += 1
+                        text_block_open = False
+                    for tc in tail.tool_calls:
+                        tc_id = tc.get("id") or f"toolu_{uuid.uuid4().hex[:20]}"
+                        tc_fn = tc.get("function") or {}
+                        name = tc_fn.get("name") or "unknown"
+                        args_str = tc_fn.get("arguments") or "{}"
+                        self._anthropic_sse("content_block_start", {
+                            "type": "content_block_start",
+                            "index": block_index,
+                            "content_block": {"type": "tool_use", "id": tc_id, "name": name, "input": {}},
+                        })
+                        self._anthropic_sse("content_block_delta", {
+                            "type": "content_block_delta",
+                            "index": block_index,
+                            "delta": {"type": "input_json_delta", "partial_json": args_str},
+                        })
+                        self._anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
+                        block_index += 1
+                        collected_tool_calls.append(tc)
+
+                if text_block_open:
+                    self._anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
+
+                _ensure_headers()
+                stop_reason = "tool_use" if collected_tool_calls else "end_turn"
+                self._anthropic_sse("message_delta", {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+                    "usage": {"output_tokens": 0},
+                })
+                self._anthropic_sse("message_stop", {"type": "message_stop"})
+
+                final_content = "".join(collected_text).strip() if collected_text else None
+                final_message: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": final_content,
+                }
+                if collected_tool_calls:
+                    final_message["tool_calls"] = collected_tool_calls
+
+                self._complete_state(
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    model_id=model_id,
+                    messages=messages,
+                    response_message=final_message,
+                )
+        except Exception as exc:
+            if not headers_sent:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
+                self.end_headers()
+            self._anthropic_sse("error", {"type": "error", "error": {"type": "api_error", "message": str(exc)}})
+        finally:
+            self.close_connection = True
 
     def _sse(self, value: Any) -> None:
         self.wfile.write(b"data: " + _json_bytes(value) + b"\n\n")
