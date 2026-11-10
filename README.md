@@ -184,6 +184,12 @@ npx pyright
 
 ---
 
+## 🙏 Acknowledgements & Attribution
+
+Special thanks and sincere appreciation to [Chayawat Chommatchaya (Yeet2042)](https://github.com/Yeet2042) for creating the foundational project [hermes-aipass](https://github.com/Yeet2042/hermes-aipass) — the original inspiration and ancestor codebase ("ศาลตั้งต้น") that made this Gemini Enterprise bridge possible.
+
+---
+
 ## 📄 License
 
 Distributed under the [MIT License](LICENSE).

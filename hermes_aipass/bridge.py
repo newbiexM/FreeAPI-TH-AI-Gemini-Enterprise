@@ -16,6 +16,7 @@ from typing import Any
 from . import __version__
 from .auth import AuthError
 from .client import AiPassClient, ContentPolicyViolationError, ProtocolError
+from .transport import Transport, get_transport
 from .models import map_reasoning
 from .prompting import (
     TOOL_SENTINEL,
@@ -48,16 +49,16 @@ _REFUSAL_PHRASES: tuple[str, ...] = (
 
 
 class BridgeRuntime:
-    def __init__(self, client: AiPassClient | None = None, sessions: SessionStore | None = None) -> None:
+    def __init__(self, client: Transport | None = None, sessions: SessionStore | None = None) -> None:
         self.client = client
         self.sessions = sessions or SessionStore()
         self._session_locks: dict[str, threading.Lock] = collections.defaultdict(threading.Lock)
         self._locks_mutex = threading.Lock()
         self.started_at = time.time()
 
-    def get_client(self) -> AiPassClient:
+    def get_client(self) -> Transport:
         if self.client is None:
-            self.client = AiPassClient()
+            self.client = get_transport()
         return self.client
 
     def session_lock(self, session_id: str) -> threading.Lock:
