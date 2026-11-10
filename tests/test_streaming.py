@@ -61,3 +61,24 @@ class TestStreamInterceptor(unittest.TestCase):
         chunk = interceptor.finish()
         self.assertEqual(len(chunk.tool_calls), 1)
         self.assertEqual(chunk.tool_calls[0]["function"]["name"], "run_cmd")
+
+
+class TestRefusalGate(unittest.TestCase):
+    def test_detects_refusal_before_flushing_first_byte(self):
+        from hermes_aipass.streaming import StreamInterceptor, RefusalDetected
+        interceptor = StreamInterceptor(gate_chars=120)
+        def is_refusal(text: str) -> bool:
+            return "ขออภัย ไม่สามารถ" in text or "Sorry, I could not" in text
+
+        # Initial chunk contains a refusal phrase
+        with self.assertRaises(RefusalDetected):
+            interceptor.feed_with_gate("ขออภัย ไม่สามารถตอบคำถามนี้ได้เนื่องจากนโยบาย", is_refusal)
+
+    def test_passes_gate_and_flushes_when_clean(self):
+        from hermes_aipass.streaming import StreamInterceptor
+        interceptor = StreamInterceptor(gate_chars=50)
+        def is_refusal(text: str) -> bool:
+            return "refusal" in text
+
+        c1 = interceptor.feed_with_gate("Here is the beginning of the answer that passes the gate smoothly.", is_refusal)
+        self.assertTrue(len(c1.text) > 0)

@@ -22,6 +22,14 @@ class StreamChunk(NamedTuple):
     tool_calls: list[dict[str, Any]]
 
 
+class RefusalDetected(Exception):
+    """Raised when an initial upstream refusal is caught by the gate before bytes are flushed."""
+
+    def __init__(self, raw: str) -> None:
+        super().__init__(f"Refusal detected in upstream stream: {raw[:100]!r}")
+        self.raw = raw
+
+
 def _bracket_run_back(s: str, i: int, char: str) -> int:
     n = 0
     while i - n - 1 >= 0 and s[i - n - 1] == char:
@@ -168,6 +176,8 @@ class StreamInterceptor:
     def __init__(self, allowed_tools: set[str] | None = None, gate_chars: int = 120) -> None:
         self.allowed_tools = allowed_tools
         self.gate_chars = gate_chars
+        self._gated: bool = True
+        self._gate_buffer: str = ""
         self._buffer: str = ""
         self._offset: int = 0
         self._call_index: int = 0
@@ -176,11 +186,37 @@ class StreamInterceptor:
         self._tool_start_len: int = 0
         self._tool_body_start: int = 0
 
+    def feed_with_gate(self, chunk: str, refusal_checker: Callable[[str], bool]) -> StreamChunk:
+        if self._gated:
+            self._gate_buffer += chunk
+            if refusal_checker(self._gate_buffer):
+                raise RefusalDetected(self._gate_buffer)
+            if len(self._gate_buffer) >= self.gate_chars:
+                self._gated = False
+                unbuffered = self._gate_buffer
+                self._gate_buffer = ""
+                return self.feed(unbuffered)
+            # Check if a tool call start marker is already present in gate buffer
+            s_idx, _ = find_marker(self._gate_buffer, "start", final=False)
+            if s_idx >= 0:
+                self._gated = False
+                unbuffered = self._gate_buffer
+                self._gate_buffer = ""
+                return self.feed(unbuffered)
+            return StreamChunk(text="", tool_calls=[])
+
+        return self.feed(chunk)
+
     def feed(self, chunk: str) -> StreamChunk:
         self._buffer += chunk
         return self._drain(final=False)
 
     def finish(self) -> StreamChunk:
+        if self._gated and self._gate_buffer:
+            self._gated = False
+            unbuffered = self._gate_buffer
+            self._gate_buffer = ""
+            self._buffer += unbuffered
         chunk = self._drain(final=True)
         self._offset = len(self._buffer)
         return chunk
