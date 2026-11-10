@@ -1,10 +1,14 @@
 {
   "include": [
-    ".",
     "hermes_aipass",
     "tests"
   ],
-  "extraPaths": [
-    "."
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [
+        "."
+      ]
+    }
   ]
 }
