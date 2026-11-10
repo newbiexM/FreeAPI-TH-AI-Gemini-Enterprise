@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python Versions" />
-  <img src="https://img.shields.io/badge/Tests-59%20Passed%20(100%25)-success?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-65%20Passed%20(100%25)-success?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests" />
   <img src="https://img.shields.io/badge/Types-Pyright%20Strict%200%20Errors-blueviolet?style=for-the-badge&logo=typescript&logoColor=white" alt="Pyright" />
   <img src="https://img.shields.io/badge/Protocols-OpenAI%20%26%20Anthropic%20SSE-orange?style=for-the-badge" alt="Protocols" />
   <img src="https://img.shields.io/badge/Security-Local%20Keychain%20Isolated-blue?style=for-the-badge&logo=apple&logoColor=white" alt="Keychain" />
@@ -132,20 +132,57 @@ hermes -m gemini-enterprise/gemini-4-argon
 
 ---
 
-## 🔌 Integration with Third-Party Clients
+## 🔌 Integration with Third-Party Clients & General Agents
 
-### Claude Code
-Add to your environment or launch command:
+You can run the bridge as a standalone daemon for **any** AI agent, IDE, or script without requiring Hermes CLI:
+
+```bash
+# Install package
+pip install -e .
+
+# Start bridge directly
+freeapi-bridge --port 8792
+```
+
+### 1. Claude Code
+Add to your environment:
 ```bash
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8792"
 export ANTHROPIC_API_KEY="freeapi"
 claude
 ```
 
-### Cursor / VS Code (Continue / Roo-Code)
+### 2. Cursor / VS Code (Continue / Roo-Code / Cline)
 * **Model Name**: `gemini-4-argon` or `gemini-3.8-flash`
 * **OpenAI Base URL**: `http://127.0.0.1:8792/v1`
 * **API Key**: `freeapi` (any non-empty string)
+
+### 3. OpenAI Official Python / Node SDK
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8792/v1", api_key="freeapi")
+response = client.chat.completions.create(
+    model="gemini-3.8-flash",
+    messages=[{"role": "user", "content": "Explain quantum computing in simple terms"}],
+)
+print(response.choices[0].message.content)
+```
+
+### 4. LiteLLM / LangChain / LlamaIndex
+```bash
+export OPENAI_API_BASE="http://127.0.0.1:8792/v1"
+export OPENAI_API_KEY="freeapi"
+litellm --model openai/gemini-3.8-flash
+```
+
+---
+
+## 🔒 Security & Privacy Guarantees
+
+- **Strict Loopback Binding**: The bridge binds exclusively to `127.0.0.1` and refuses to bind to public IP interfaces.
+- **Zero Credential Exfiltration**: All session tokens and cookies are retained in local OS storage (macOS Keychain or permission-restricted container file). No telemetry or credentials are sent outside direct Google/AiPASS endpoints.
+- **Sanitized Multi-Tenant Isolation**: The bridge supports configurable tenant IDs via `AIPASS_DISCOVERY_ENGINE_CID` without exposing private organization settings.
 
 ---
 
