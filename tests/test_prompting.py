@@ -119,6 +119,28 @@ class PromptingTests(unittest.TestCase):
         self.assertIn("Analyzing Zed IDE configuration now.", formatted)
         self.assertIn("Previous tool request:", formatted)
 
+    def test_tolerant_bracket_and_fenced_tool_parsing(self):
+        # 1. Tolerant triple brackets with markdown code fence
+        raw1 = "Thinking...\n<<<TOOL_CALL>>>\n```json\n{\"name\": \"terminal\", \"arguments\": {\"command\": \"df -h\"}}\n```\n<<<END_TOOL_CALL>>>"
+        msg1 = parse_assistant(raw1, {"terminal"})
+        self.assertEqual(len(msg1["tool_calls"]), 1)
+        self.assertEqual(msg1["tool_calls"][0]["function"]["name"], "terminal")
+        self.assertIn('"command":"df -h"', msg1["tool_calls"][0]["function"]["arguments"])
+
+        # 2. Tolerant double brackets <<tool_call>>
+        raw2 = "<<tool_call>>{\"name\": \"terminal\", \"arguments\": {\"command\": \"whoami\"}}<<tool_call>>"
+        msg2 = parse_assistant(raw2, {"terminal"})
+        self.assertEqual(len(msg2["tool_calls"]), 1)
+        self.assertEqual(msg2["tool_calls"][0]["function"]["name"], "terminal")
+
+    def test_recency_bias_output_rules_at_prompt_end(self):
+        prompt = bootstrap_prompt(
+            [{"role": "user", "content": "What is the date?"}],
+            TOOLS,
+        )
+        self.assertIn("<output_rules>", prompt)
+        self.assertTrue(prompt.strip().endswith("</output_rules>"))
+
     def test_suppresses_hallucinated_tool_result_simulation(self):
         raw = (
             "Let me check the port.\n"

@@ -9,7 +9,10 @@ import uuid
 from typing import Any
 
 TOOL_SENTINEL = "@@HERMES_TOOL_CALL@@"
-_TOOL_CALL_REGEX = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+_TOOL_CALL_REGEX = re.compile(
+    r"<{1,4}(?:tool_call|TOOL_CALL)>{1,4}(.*?)<{1,4}/?(?:tool_call|TOOL_CALL|END_TOOL_CALL)>{1,4}",
+    re.DOTALL | re.IGNORECASE,
+)
 
 _HISTORICAL_TOOL_RETENTION_COUNT = 8
 _HISTORICAL_TOOL_MAX_CHARS = 300
@@ -180,6 +183,16 @@ _SYSTEM_PREAMBLE = (
 )
 
 
+_OUTPUT_RULES = (
+    "<output_rules>\n"
+    "RESPOND WITH EXACTLY ONE OF:\n"
+    "1. <tool_call>{\"name\":\"<tool_name>\",\"arguments\":{...}}</tool_call> (or <<<TOOL_CALL>>>...<<<END_TOOL_CALL>>>)\n"
+    "2. Plain text final answer (only when no tool applies)\n"
+    "Never simulate or hallucinate tool execution results.\n"
+    "</output_rules>"
+)
+
+
 def bootstrap_prompt(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> str:
     raw_systems = "\n\n".join(message_text(message) for message in messages if message.get("role") == "system").strip()
     if raw_systems:
@@ -216,6 +229,7 @@ def bootstrap_prompt(messages: list[dict[str, Any]], tools: list[dict[str, Any]]
     if objective_section:
         parts.append(objective_section)
     parts.append(f"Conversation:\n{turns}")
+    parts.append(_OUTPUT_RULES)
     return "\n\n".join(parts)
 
 
@@ -225,6 +239,7 @@ def delta_prompt(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | N
     if tools:
         parts.append(_tool_guide(tools))
     parts.append(f"Continue the agent conversation using these new events:\n\n{turns}")
+    parts.append(_OUTPUT_RULES)
     return "\n\n".join(parts)
 
 
@@ -246,6 +261,12 @@ def parse_assistant(raw: str, allowed_tools: set[str]) -> dict[str, Any]:
         converted = []
         for match in tool_matches:
             block = match.group(1).strip()
+            if block.startswith("```json"):
+                block = block[7:].strip()
+            elif block.startswith("```"):
+                block = block[3:].strip()
+            if block.endswith("```"):
+                block = block[:-3].strip()
             try:
                 parsed = json.loads(block)
             except json.JSONDecodeError as exc:
